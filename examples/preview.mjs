@@ -9,9 +9,9 @@ const names = { codex: 'Codex', antigravityDesktop: 'Antigravity', workbuddyDesk
 export function fixture() {
   const now = Date.now();
   const specs = [
-    ['codex', '优化工作台的会话管理体验', 'running', 'CodexScheduler', '正在调整页面布局与交互细节', true],
+    ['codex', '优化工作台的会话管理体验', 'running', 'AgentDesk', '正在调整页面布局与交互细节', true],
     ['antigravityDesktop', '整理项目文档与使用说明', 'running', 'project-docs', '正在检查文档中的示例与链接', false],
-    ['workbuddyDesktop', '检查任务队列的异常处理', 'waiting', 'CodexScheduler', '需要在原客户端确认操作权限', false],
+    ['workbuddyDesktop', '检查任务队列的异常处理', 'waiting', 'AgentDesk', '需要在原客户端确认操作权限', false],
     ['codex', '为接续任务补充边界测试', 'running', 'scheduler-tests', '正在运行测试并检查失败项', false],
     ['workbuddyDesktop', '完成本周修改记录', 'completed', 'project-docs', '本轮任务已完成，回复可查看', false],
     ['codex', '梳理桌面客户端连接状态', 'completed', 'desktop-bridge', '本轮任务已完成，回复可查看', true],
@@ -22,8 +22,8 @@ export function fixture() {
     ['整理界面优化后的测试结果', 'codex', 'queue', 'ready'],
     ['复查会话列表与提醒流程', 'workbuddyDesktop', 'afterTask', 'pending'],
     ['生成明天的项目进展摘要', 'antigravityDesktop', 'time', 'pending'],
-  ].map(([title, provider, type, status], i) => ({ id: 'task-' + i, title, provider, cwd: 'E:\\CodexScheduler', prompt: '检查项目中的相关修改，记录验证结果与需要继续处理的问题。', times: type === 'time' ? [{ at: now + 3600000, state: 'pending' }] : [], trigger: { type, state: 'pending', taskId: 'task-0', onFailure: 'stop' }, threadMode: 'new', threadId: '', sandbox: 'workspace-write', approval: 'ask', latePolicy: 'run', model: '', effort: '', networkAccess: false, order: i, revision: 1, paused: false, createdAt: now - 600000, queueStatus: { status, reason: type === 'afterTask' ? '等待前置任务成功结束' : '' } }));
-  const runs = ['completed', 'completed', 'failed'].map((status, i) => ({ id: 'run-' + i, taskId: 'history-' + i, taskTitle: ['整理本周项目修改记录', '验证已有对话的上下文接续', '检测桌面客户端连接'][i], provider: ['codex', 'workbuddyDesktop', 'antigravityDesktop'][i], cwd: 'E:\\CodexScheduler', status, startedAt: now - (5 - i) * 600000, endedAt: now - (5 - i) * 600000 + 93000, output: status === 'failed' ? '' : '检查已完成。\n\n1. 已整理本次修改涉及的文件与行为。\n2. 已验证队列排序、任务接续和会话提醒。\n3. 相关结果已保留，可继续安排下一步任务。', logs: [], prompt: '检查项目中的相关功能，并整理验证结果。', error: status === 'failed' ? '桌面客户端未连接，请打开客户端后重新检测。' : '', threadId: 'demo-run-' + i }));
+  ].map(([title, provider, type, status], i) => ({ id: 'task-' + i, title, provider, cwd: 'E:\\AgentDesk', prompt: '检查项目中的相关修改，记录验证结果与需要继续处理的问题。', times: type === 'time' ? [{ at: now + 3600000, state: 'pending' }] : [], trigger: { type, state: 'pending', taskId: 'task-0', onFailure: 'stop' }, threadMode: 'new', threadId: '', sandbox: 'workspace-write', approval: 'ask', latePolicy: 'run', model: '', effort: '', networkAccess: false, order: i, revision: 1, paused: false, createdAt: now - 600000, queueStatus: { status, reason: type === 'afterTask' ? '等待前置任务成功结束' : '' } }));
+  const runs = ['completed', 'completed', 'failed'].map((status, i) => ({ id: 'run-' + i, taskId: 'history-' + i, taskTitle: ['整理本周项目修改记录', '验证已有对话的上下文接续', '检测桌面客户端连接'][i], provider: ['codex', 'workbuddyDesktop', 'antigravityDesktop'][i], cwd: 'E:\\AgentDesk', status, startedAt: now - (5 - i) * 600000, endedAt: now - (5 - i) * 600000 + 93000, output: status === 'failed' ? '' : '检查已完成。\n\n1. 已整理本次修改涉及的文件与行为。\n2. 已验证队列排序、任务接续和会话提醒。\n3. 相关结果已保留，可继续安排下一步任务。', logs: [], prompt: '检查项目中的相关功能，并整理验证结果。', error: status === 'failed' ? '桌面客户端未连接，请打开客户端后重新检测。' : '', threadId: 'demo-run-' + i }));
   const notifications = [
     { id: 'note-0', sessionKey: sessions[2].key, provider: sessions[2].provider, title: '检查任务队列的异常处理', detail: '需要确认操作权限，请在 WorkBuddy 中处理。', at: now - 80000, readAt: null },
     { id: 'note-1', sessionKey: sessions[4].key, provider: sessions[4].provider, title: '完成本周修改记录', detail: '任务已完成，查看回复后可安排下一步。', at: now - 540000, readAt: null },
@@ -85,5 +85,5 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  createPreviewServer().listen(43128, '127.0.0.1', () => console.log('UI preview: http://127.0.0.1:43128 (in-memory demo data)'));
+  createPreviewServer().listen(43128, '127.0.0.1', () => console.log('AgentDesk preview: http://127.0.0.1:43128 (in-memory demo data)'));
 }

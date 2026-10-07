@@ -163,7 +163,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/sessions/sync') { await sessions.refresh(); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/sessions/settings') { sessions.configure(await body(request)); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/notifications/test') {
-      await system.notify('Agent 工作台提醒已连接', '任务完成或需要处理时，会在这里提醒你。', origin + '/#sessions');
+      await system.notify('AgentDesk 提醒已连接', '任务完成或需要处理时，会在这里提醒你。', origin + '/#sessions');
       return send(response, 200, { ok: true });
     }
     const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
@@ -301,7 +301,7 @@ async function shutdown() {
 
 server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `端口 ${port} 已被占用。` : error.message); void shutdown(); });
 server.listen(port, '127.0.0.1', () => {
-  console.log(`Codex local scheduler: ${origin}`);
+  console.log(`AgentDesk: ${origin}`);
   scheduler.start();
   sessions.start();
   void system.inspect().then(() => scheduler.emit('change'));

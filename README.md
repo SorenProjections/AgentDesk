@@ -1,4 +1,4 @@
-# Agent 会话工作台
+# AgentDesk · 智能体工作台
 
 在本机统一安排 Codex、Antigravity 和 WorkBuddy 的任务：定时发送、队列执行、完成后接续，以及会话状态与结果提醒。
 
@@ -10,11 +10,11 @@
 
 这些等待本身未必能消除，但我们可以提前安排好接下来要做的事。把适合的任务交给合适的 Agent，把发送时间、执行顺序和前置条件写清楚，让任务在条件满足时有序接续，而不必每一步都守在屏幕前。
 
-**Agent 会话工作台** 就是为此而做的一个本地工具。它将跨 Agent 的定时任务、工作队列、会话观察和完成提醒放在同一个界面中，希望让我们少花一些精力盯进度、多花一些精力判断方向和检查结果。长任务运行时，可以安心去做别的事；知道额度何时恢复时，可以提前预约下一条消息；需要多个 Agent 配合时，可以先把任务与顺序安排好。
+**AgentDesk** 就是为此而做的一个本地工具。它将跨 Agent 的定时任务、工作队列、会话观察和完成提醒放在同一个界面中，希望让我们少花一些精力盯进度、多花一些精力判断方向和检查结果。长任务运行时，可以安心去做别的事；知道额度何时恢复时，可以提前预约下一条消息；需要多个 Agent 配合时，可以先把任务与顺序安排好。
 
 ## 界面预览
 
-![会话工作台：来源状态、会话列表、提醒收件箱与安静时段](docs/images/workspace.png)
+![AgentDesk 会话工作台：来源状态、会话列表、提醒收件箱与安静时段](docs/images/workspace.png)
 
 截图使用演示数据。界面支持浅色导航、会话详情抽屉、搜索筛选与窄屏布局。
 
@@ -37,9 +37,11 @@
 
 主要运行环境为 **Windows + Node.js 22.13 或更新版本**。项目没有需要安装的 npm 依赖。原生会话读取使用 Node.js 内置 SQLite，因此需要支持无启动标志加载该模块的版本；参见 [Node.js SQLite 文档](https://nodejs.org/download/release/v22.13.1/docs/api/sqlite.html)。
 
-下载源码或克隆仓库后，在项目目录执行：
+下载源码后，在项目目录执行 `npm start`；也可以克隆仓库后启动：
 
 ```bash
+git clone https://github.com/NewbieonfireSpongeforknowledge/AgentDesk.git
+cd AgentDesk
 npm start
 ```
 
@@ -94,6 +96,8 @@ npm run preview
 | `WORKBUDDY_DESKTOP_BINARY` | WorkBuddy 桌面程序路径 |
 
 客户端需要各自完成安装和登录。项目不会附带客户端安装包、账号或访问凭据。使用自定义数据目录时，请同时确认该目录不会进入版本控制；更多说明见 [SECURITY.md](SECURITY.md)。
+
+项目已更名为 AgentDesk。为兼容已有安装，环境变量继续沿用原名称，数据目录和启动方式不变。
 
 ## 开发与贡献
 
