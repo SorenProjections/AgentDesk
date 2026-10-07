@@ -1,0 +1,39 @@
+# Local tasks, prompts, replies, notifications, and scratch work
+/data/
+/work/
+*.log
+*.pid
+*.pid.lock
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-*
+
+# Agent settings, credentials, and machine-specific state
+.antigravitycli/
+.antigravity/
+.codex/
+.agents/
+.aws/
+.workbuddy/
+.codebuddy/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies, coverage, and editor/OS artifacts
+node_modules/
+coverage/
+.nyc_output/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo

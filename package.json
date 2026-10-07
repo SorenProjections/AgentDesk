@@ -1,0 +1,11 @@
+{
+  "name": "codex-local-scheduler",
+  "version": "3.0.0",
+  "private": true,
+  "license": "MIT",
+  "author": "NewbieonfireSpongeforknowledge",
+  "type": "module",
+  "description": "Local native session workspace, completion reminders and editable queue for Codex, Antigravity and WorkBuddy",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": { "start": "node launch.mjs", "serve": "node server.mjs", "stop": "node launch.mjs --stop", "preview": "node examples/preview.mjs", "test": "node --test test/*.test.mjs" }
+}

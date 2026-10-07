@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+  <title>Agent 工作台</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script>
+</head><body>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+  <svg class="svg-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M3 6h1M3 12h1M3 18h1"/></symbol>
+    <symbol id="i-runs" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 3 7M3 4v7h7M12 7v5l3 2"/></symbol>
+    <symbol id="i-agents" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/><path d="M9 10v1m6-1v1M9 15h6M12 2v3M2 10h3m14 0h3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6M9 15v6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3ZM8 8h8M8 12h5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14a9 9 0 0 1-10-11 9 9 0 1 0 10 11Z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2ZM12 9v4m0 4h.01"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="m16 3 5 5-5 3-3 6-6-6 6-3ZM3 21l7-7"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></symbol>
+  </svg>
+  <div class="app-shell">
+    <aside class="navigation">
+      <a class="brand" href="#sessions"><img src="/favicon.svg" width="38" height="38" alt=""><span><strong>Agent 工作台</strong><small>本地会话与任务</small></span></a>
+      <nav class="nav-list" aria-label="主导航">
+        <span class="nav-group-label">工作空间</span>
+        <button class="nav-item selected" aria-current="page" data-nav="sessions" type="button"><svg class="icon"><use href="#i-message"/></svg><span>会话工作台</span><span id="navSessions" class="nav-count attention" hidden></span></button>
+        <button class="nav-item" data-nav="queue" type="button"><svg class="icon"><use href="#i-queue"/></svg><span>工作队列</span><span id="navPending" class="nav-count">0</span></button>
+        <button class="nav-item" data-nav="runs" type="button"><svg class="icon"><use href="#i-runs"/></svg><span>运行记录</span><span id="navAttention" class="nav-count attention" hidden></span></button>
+        <span class="nav-group-label management-label">管理</span>
+        <button class="nav-item" data-nav="agents" type="button"><svg class="icon"><use href="#i-agents"/></svg><span>Agent 接入</span></button>
+        <button class="nav-item" data-nav="settings" type="button"><svg class="icon"><use href="#i-settings"/></svg><span>后台设置</span></button>
+      </nav>
+      <div class="navigation-note"><svg class="icon"><use href="#i-monitor"/></svg><strong>让任务在后台继续</strong><p>关闭网页后仍会调度，保持电脑开机与网络连接即可。</p><button class="nav-link" data-nav="settings" type="button">后台运行设置 <svg class="icon"><use href="#i-chevron"/></svg></button></div>
+      <div class="nav-footer"><span id="engineStatus" class="engine-status">正在连接后台</span><span class="local-label">数据保存在本机</span></div>
+    </aside>
+    <main class="main-shell" id="mainContent" tabindex="-1">
+      <div class="workspace-bar"><div class="breadcrumb"><svg class="icon"><use href="#i-monitor"/></svg><span>本地工作空间</span><span class="breadcrumb-separator">/</span><span id="breadcrumbCurrent">会话工作台</span></div><span id="currentTime" class="current-time"></span></div>
+      <div class="page-content">
+      <header class="page-header"><div><h1 id="pageTitle">会话工作台</h1><p id="pageDescription">集中查看会话进展与任务提醒。</p></div><button id="newTask" class="primary" type="button"><svg class="icon"><use href="#i-plus"/></svg>新建任务</button></header>
+      <button id="attentionBanner" class="attention-banner" type="button" hidden><svg class="icon"><use href="#i-alert"/></svg><span id="attentionText"></span><span>查看运行记录 <svg class="icon"><use href="#i-chevron"/></svg></span></button>
+      <section id="sessionsPage" data-page="sessions" aria-labelledby="pageTitle">
+        <div class="session-overview">
+          <div class="session-presence"><span class="presence-mark"><svg class="icon"><use href="#i-activity"/></svg></span><div class="presence-copy"><h2 id="sessionAssurance">正在同步会话</h2><p id="sessionAssuranceDetail">后台持续观察任务，完成后会在这里提醒。</p></div><button id="syncSessions" class="secondary compact" type="button"><svg class="icon"><use href="#i-refresh"/></svg><span>同步会话</span></button></div>
+          <div id="sessionSources" class="session-sources" aria-label="会话来源与同步范围"></div>
+        </div>
+        <div class="session-workspace">
+          <section class="session-main" aria-label="会话管理">
+            <div class="session-section-heading"><h2>我的会话 <span id="sessionCount" class="section-count">0</span></h2><span class="section-hint">点击会话查看详情</span></div>
+            <div class="session-toolbar"><div class="search-field"><svg class="icon"><use href="#i-search"/></svg><label class="visually-hidden" for="sessionSearch">搜索会话、项目或备注</label><input id="sessionSearch" type="search" placeholder="搜索会话、项目或备注" autocomplete="off"><kbd aria-hidden="true">/</kbd></div><label class="visually-hidden" for="sessionProvider">Agent 筛选</label><select id="sessionProvider"><option value="all">所有 Agent</option><option value="codex">Codex</option><option value="workbuddyDesktop">WorkBuddy</option><option value="antigravityDesktop">Antigravity</option><option value="cli">CLI</option></select></div>
+            <div class="session-filters" aria-label="会话状态筛选">
+              <button class="filter selected" data-session-filter="active" type="button" aria-pressed="true">进行中 <span data-session-count="active">0</span></button>
+              <button class="filter" data-session-filter="attention" type="button" aria-pressed="false">需要处理 <span data-session-count="attention">0</span></button>
+              <button class="filter" data-session-filter="recent" type="button" aria-pressed="false">最近会话 <span data-session-count="recent">0</span></button>
+              <button class="filter" data-session-filter="pinned" type="button" aria-pressed="false">已置顶 <span data-session-count="pinned">0</span></button>
+              <button class="filter" data-session-filter="hidden" type="button" aria-pressed="false">已收起 <span data-session-count="hidden">0</span></button>
+            </div>
+            <div id="sessionList" class="session-list"></div>
+            <div class="session-list-footer"><span class="status-dot"></span>状态由后台同步<span>权限请求请在原客户端处理</span></div>
+          </section>
+          <aside class="session-sidebar" aria-label="提醒与安静时段">
+            <section class="session-inbox" aria-label="提醒收件箱"><div class="inbox-heading"><h2><svg class="icon"><use href="#i-bell"/></svg>提醒收件箱 <span id="unreadNotifications" class="section-count">0</span></h2><button id="readAllNotifications" class="text-button" type="button">全部已读</button></div>
+              <div class="inbox-filters" aria-label="提醒筛选"><button class="inbox-filter selected" data-inbox-filter="all" aria-pressed="true" type="button">全部提醒</button><button class="inbox-filter" data-inbox-filter="unread" aria-pressed="false" type="button">未读</button></div>
+              <div id="notificationList" class="notification-list"></div>
+              <details class="reminder-settings"><summary><svg class="icon"><use href="#i-settings"/></svg>提醒设置<span id="notificationSettingState">已开启</span><svg class="icon disclosure-icon"><use href="#i-chevron"/></svg></summary><div class="reminder-controls"><label><input id="desktopNotifications" type="checkbox">Windows 完成与处理提醒</label><p id="notificationHelp">网页关闭后仍会提醒。请允许 Windows 显示 PowerShell 通知。</p><button id="testNotification" class="text-button" type="button">测试系统提醒</button></div></details>
+            </section>
+            <section class="session-break" aria-label="安静时段"><div class="break-heading"><svg class="icon"><use href="#i-moon"/></svg><strong id="quietLabel">留一段专注时间</strong><span class="break-status" id="quietStatus" hidden>进行中</span></div><p id="quietDetail">暂缓系统弹窗，结果仍会保存在收件箱。</p><div class="session-break-actions"><button id="studyBreak" class="secondary" type="button"><svg class="icon"><use href="#i-clock"/></svg>学习 25 分钟</button><button id="restBreak" class="secondary" type="button">休息 60 分钟</button><button id="endBreak" class="text-button" type="button" hidden>提前恢复提醒</button></div></section>
+          </aside>
+        </div>
+      </section>
+      <section id="queuePage" data-page="queue" hidden aria-labelledby="pageTitle">
+        <div class="queue-status"><div><span id="queueDot" class="status-dot"></span><strong id="queueStateLabel">队列自动运行</strong><span id="queueMetrics" class="muted"></span></div><button id="toggleQueue" class="secondary compact" type="button">暂停队列</button></div><p id="queueReason" class="queue-reason"></p>
+        <div id="queueWorkspace" class="queue-workspace">
+          <section class="queue-list-pane" aria-label="任务列表"><div class="list-toolbar"><div class="filters" aria-label="任务筛选"><button class="filter selected" data-filter="all" type="button" aria-pressed="true">全部 <span id="taskCount">0</span></button><button class="filter" data-filter="pending" type="button" aria-pressed="false">待发送</button><button class="filter" data-filter="finished" type="button" aria-pressed="false">已结束</button></div><label class="visually-hidden" for="taskSearch">搜索任务</label><input id="taskSearch" class="search-input" type="search" placeholder="搜索任务或项目"></div><div id="taskList" class="task-list"></div></section>
+          <section id="taskEditor" class="editor" hidden aria-label="任务详情">
+            <div class="editor-heading"><div><button id="closeEditor" class="back-link" type="button">‹ 返回队列</button><h2 id="editorTitle">新建任务</h2><p id="editorSubtitle">保存前填写好提示词与发送条件。</p></div><button id="deleteTask" class="quiet danger" type="button" hidden>删除任务</button></div>
+            <div id="taskActions" class="task-actions" hidden><button id="editTask" class="secondary" type="button">编辑消息</button><button id="cancelEdit" class="quiet" type="button" hidden>结束编辑</button><button id="pauseTask" class="secondary" type="button">暂停任务</button><button id="followTask" class="quiet" type="button">添加接续</button><button id="duplicateTask" class="quiet" type="button">复制任务</button><button id="taskRuns" class="quiet" type="button">运行记录</button><button id="runTask" class="quiet" type="button">立即运行一次</button></div><p id="taskReadiness" class="task-readiness" hidden></p>
+            <form id="taskForm">
+              <section class="form-section"><div class="section-heading"><span class="step-number">1</span><h3>执行位置</h3></div>
+                <div class="form-grid"><div><label for="taskTitle">任务名称</label><input id="taskTitle" name="title" type="text" maxlength="100" placeholder="例如：完成测试并整理结果" required></div><div><label for="provider">由哪个 Agent 执行</label><select id="provider"><optgroup label="桌面与本机接口"><option value="codex">Codex</option><option value="antigravityDesktop">Antigravity 桌面端</option><option value="workbuddyDesktop">WorkBuddy 桌面端</option></optgroup><optgroup label="独立 CLI"><option value="antigravity">Antigravity CLI</option><option value="workbuddy">WorkBuddy CLI</option></optgroup></select></div></div><p id="providerHelp" class="field-help"></p>
+                <label for="cwd">本地项目文件夹</label><div class="input-button"><input id="cwd" name="cwd" type="text" list="knownFolders" placeholder="选择文件夹，或粘贴完整路径" spellcheck="false" required><button id="pickFolder" class="secondary" type="button"><svg class="icon"><use href="#i-folder"/></svg>选择</button></div><datalist id="knownFolders"></datalist><p id="folderHelp" class="field-help">Agent 在这个文件夹中运行，使用项目自己的说明与配置。</p>
+                <label>目标对话</label><div class="choice-row"><label class="radio-choice"><input type="radio" name="threadMode" value="new" checked><span>新建对话</span></label><label class="radio-choice"><input type="radio" name="threadMode" value="existing"><span>已有对话</span></label><label class="radio-choice"><input type="radio" name="threadMode" value="previous"><span>前置任务对话</span></label></div><p id="newThreadHelp" class="field-help">执行时新建对话；多个发送时间继续使用同一个对话。</p>
+                <div id="existingThreadField" class="condition-fields" hidden><label for="threadSelect">项目中的已有对话</label><div class="input-button"><select id="threadSelect"><option value="">先选择项目文件夹</option></select><button id="refreshThreads" class="secondary" type="button">刷新</button></div><div id="manualThreadField" hidden><label for="manualThread">或填写 CLI 对话编号</label><input id="manualThread" type="text" maxlength="120" placeholder="已有 CLI 会话的编号"><p class="field-help">CLI 列表显示本面板创建过的对话，其他对话能否续接取决于 CLI。</p></div><button id="moreThreads" class="text-button" type="button" hidden>加载更多对话</button><p class="field-help">避免在另一个客户端同时运行目标对话。</p></div>
+              </section>
+              <section class="form-section"><div class="section-heading"><span class="step-number">2</span><h3>发送条件</h3><span class="timezone">北京时间 UTC+8</span></div><label class="visually-hidden" for="triggerType">发送条件</label><select id="triggerType"><option value="time">到指定时间发送</option><option value="queue">加入队列，轮到时发送</option><option value="afterTask">前置队列任务结束后发送</option></select><div id="dependencyFields" class="condition-fields" hidden><label for="afterTask">等待哪个任务</label><select id="afterTask"></select><label for="afterRun">等待哪次运行</label><select id="afterRun"></select><label for="onFailure">前置任务失败时</label><select id="onFailure"><option value="stop">停止接续，等待我处理</option><option value="continue">结束后仍继续（状态不明除外）</option></select></div><div id="timeFields" class="condition-fields"><div id="timeList" class="time-list"></div><button id="addTime" class="text-button" type="button">＋ 添加一个发送时间</button></div><p id="triggerHelp" class="field-help"></p></section>
+              <section class="form-section prompt-section"><div class="section-heading"><span class="step-number">3</span><h3>预设提示词</h3><span id="promptCount" class="prompt-count">0 字</span></div><label class="visually-hidden" for="prompt">预设消息</label><textarea id="prompt" name="prompt" rows="8" maxlength="64000" placeholder="写下任务、操作范围和完成条件。例如：运行项目测试，修复失败项，最后整理修改内容与测试结果。" required></textarea><p class="field-help">发送前可以修改。执行记录会保留实际发送的内容。</p></section>
+              <details class="advanced"><summary>模型、权限与其他设置</summary><div class="timeout-field"><label for="timeoutMinutes">最长运行或监控时间（分钟）</label><input id="timeoutMinutes" type="number" min="1" max="1440" value="120"><p class="field-help"></p></div><div id="codexPermissions" class="form-grid"><div><label for="sandbox">文件操作</label><select id="sandbox"><option value="workspace-write">允许修改所选文件夹</option><option value="read-only">仅读取文件</option></select></div><div><label for="approval">需要额外权限时</label><select id="approval"><option value="ask">在面板中等待我的确认</option><option value="deny">无人值守，受限操作直接失败</option></select></div><div><label for="latePolicy">错过预约时间时</label><select id="latePolicy"><option value="run">后台恢复后补跑</option><option value="skip">超过 1 分钟未启动则跳过</option></select></div><div><label for="model">模型</label><input id="model" type="text" maxlength="120" placeholder="沿用当前配置"></div><div><label for="effort">推理强度</label><select id="effort"><option value="">沿用当前配置</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option><option value="max">最大</option><option value="ultra">Ultra</option></select></div><label class="checkbox-choice"><input id="networkAccess" type="checkbox">允许任务使用网络</label></div><p id="defaultModel" class="field-help"></p></details>
+              <div class="form-actions"><div><strong id="scheduleSummary"></strong><span id="saveHint">任务保存在本机</span></div><button id="saveTask" class="primary" type="submit">保存任务</button></div>
+            </form>
+          </section>
+        </div>
+      </section>
+      <section id="runsPage" data-page="runs" hidden aria-labelledby="pageTitle"><div id="recordsWorkspace" class="records-workspace"><section class="run-list-pane" aria-label="运行列表"><div class="list-toolbar"><label class="visually-hidden" for="runSearch">搜索运行记录</label><input id="runSearch" type="search" placeholder="搜索运行记录"><button id="refreshRuns" class="quiet" type="button">刷新</button></div><div id="runList" class="run-list"></div></section><section class="run-panel" aria-label="运行详情"><button id="closeRun" class="back-link" type="button">‹ 返回运行列表</button><label class="visually-hidden" for="runSelect">选择运行记录</label><select id="runSelect" class="visually-hidden" tabindex="-1"><option value="">还没有运行记录</option></select><div id="runEmpty" class="run-empty"><div class="empty-mark"><svg class="icon"><use href="#i-runs"/></svg></div><h2>每次执行，都有迹可循</h2><p>任务开始后，在这里查看 Agent 回复、执行日志和需要处理的请求。</p><button class="text-button" data-nav="queue" type="button">前往工作队列</button></div><div id="runDetails" hidden><div class="run-heading"><div><p id="runProvider" class="muted"></p><h2 id="runTitle">运行详情</h2></div><span id="runStatus" class="badge"></span></div><div id="runTime" class="run-time"></div><p id="runError" class="error-message" hidden></p><div class="run-links"><a id="openThread" class="text-link" href="#" hidden>在 Codex 中打开对话</a><button id="interruptRun" class="text-button danger" type="button" hidden>停止运行</button></div><div id="requests" class="requests"></div><div class="output-heading"><h3>Agent 回复</h3><button id="copyOutput" class="quiet" type="button">复制回复</button></div><pre id="runOutput" class="run-output"></pre><details class="execution-log"><summary>实际发送的提示词</summary><pre id="runPrompt"></pre></details><details class="execution-log"><summary>执行日志</summary><pre id="runLog"></pre></details></div></section></div></section>
+      <section id="agentsPage" data-page="agents" hidden aria-labelledby="pageTitle"><div class="page-note"><svg class="icon"><use href="#i-agents"/></svg><p>桌面连接复用客户端账号与对话。检测连接检查入口，测试发送验证真实回复。</p></div><div id="providerList" class="provider-list"></div><details class="cli-section"><summary>独立 CLI 入口 <span>单独的登录与运行环境</span></summary><div id="cliProviderList" class="provider-list"></div></details><div class="connection-footnote"><p>桌面端的权限确认和追问在原客户端处理。客户端更新后，重新检测并测试连接。</p><button id="reconnect" class="text-button" type="button">重新连接 Codex</button></div></section>
+      <section id="settingsPage" data-page="settings" hidden aria-labelledby="pageTitle"><section class="settings-section"><div class="settings-heading"><svg class="icon"><use href="#i-moon"/></svg><div><h2>夜间运行</h2><p>让后台持续调度，不必一直打开网页。</p></div></div><label class="setting-row"><span><strong>保持电脑唤醒</strong><small>阻止空闲自动睡眠，屏幕可以关闭。手动睡眠和关机仍会停止执行。</small></span><input id="keepAwake" class="switch" type="checkbox"></label><label class="setting-row"><span><strong>登录后自动启动</strong><small>登录 Windows 后启动本机后台；未登录系统时不会运行。</small></span><input id="autostart" class="switch" type="checkbox"></label><p id="systemHelp" class="field-help"></p></section><section class="settings-section"><div class="settings-heading"><svg class="icon"><use href="#i-settings"/></svg><div><h2>失败处理</h2><p>保留执行记录，核实后再继续。</p></div></div><label class="setting-row"><span><strong>任务失败时暂停队列</strong><small>失败或停止后暂停后续发送。状态不明时始终暂停，不自动重发。</small></span><input id="pauseOnFailure" class="switch" type="checkbox" checked></label></section><section class="settings-section stop-section"><div><h2>停止后台</h2><p>任务数据会保留。再次运行 start.cmd 即可恢复调度。</p></div><button id="stopBackend" class="secondary danger" type="button">停止后台</button></section></section>
+      </div>
+    </main>
+  </div>
+  <dialog id="sessionDetail" class="session-detail" aria-labelledby="sessionDetailTitle"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body></html>
