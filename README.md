@@ -40,7 +40,7 @@
 下载源码后，在项目目录执行 `npm start`；也可以克隆仓库后启动：
 
 ```bash
-git clone https://github.com/NewbieonfireSpongeforknowledge/AgentDesk.git
+git clone https://github.com/SorenProjections/AgentDesk.git
 cd AgentDesk
 npm start
 ```
