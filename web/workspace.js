@@ -1,5 +1,6 @@
 import {$,element,icon} from './api.js';
 const pages={sessions:['会话工作台','集中查看会话进展与任务提醒。'],queue:['工作队列','安排下一步，让任务按你的节奏接续。'],runs:['运行记录','查看执行结果，回溯每一次任务。'],agents:['Agent 接入','连接桌面客户端，开始协同工作。'],settings:['后台设置','设置运行方式，让工作有序继续。']};
+pages.supervision=['任务督导','按目标与验收标准检查成果，管理纠偏与文件占用。'];
 export class Workspace {
   constructor({newTask,openRun}){
     this.openRun=openRun;this.newTask=newTask;

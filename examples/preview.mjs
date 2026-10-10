@@ -34,6 +34,8 @@ export function fixture() {
 
 export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}) {
   let state = fixture();
+  state.supervision = { missions: [], leases: [], collecting: 0 };
+  const demoMissions = [];
   const clients = new Set();
   const send = (res, value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
   const updateCounts = () => {
@@ -56,6 +58,12 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
       if (route === '/__preview/reset') { state = fixture(); return send(res, { ok: true }); }
       if (route === '/__preview/state' && req.method === 'POST') { Object.assign(state, input); updateCounts(); for (const client of clients) client.write('event: change\ndata: {}\n\n'); return send(res, state); }
       if (route === '/api/state') { updateCounts(); return send(res, state); }
+      if (route === '/api/supervision') return send(res, { ...state.supervision, missions: demoMissions });
+      if (route === '/api/supervision/missions' && req.method === 'POST') {
+        const mission = { ...input, id: 'demo-supervision-' + demoMissions.length, state: 'draft', binding: null, instructions: [], reviews: [], corrections: 0, maxCorrections: input.maxCorrections ?? 2 };
+        demoMissions.push(mission); return send(res, mission, 201);
+      }
+      if (/^\/api\/supervision\/missions\/[a-zA-Z0-9-]+$/.test(route) && req.method === 'GET') return send(res, demoMissions.find(m => m.id === route.split('/').at(-1)) || {});
       if (route === '/api/threads') return send(res, { threads: state.sessionHub.sessions.map(s => ({ id: s.nativeId, name: s.name, cwd: s.cwd, status: s.status })) });
       if (route.startsWith('/api/runs/')) return send(res, state.runs.find(r => r.id === route.split('/').at(-1)));
       if (route === '/api/sessions/sync') { state.sessionHub.lastSyncAt = Date.now(); return send(res, {}); }
@@ -74,7 +82,7 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
       }
       if (route.startsWith('/api/')) return send(res, { error: '演示模式：此操作不会连接客户端或发送任务。' }, 400);
       const file = route === '/' ? 'index.html' : route.slice(1);
-      if (!['index.html', 'styles.css', 'app.js', 'api.js', 'workspace.js', 'providers-view.js', 'sessions-view.js', 'favicon.svg'].includes(file)) return send(res, {}, 404);
+      if (!['index.html', 'styles.css', 'supervision.css', 'supervision-view.js', 'app.js', 'api.js', 'workspace.js', 'providers-view.js', 'sessions-view.js', 'favicon.svg'].includes(file)) return send(res, {}, 404);
       let content = readFileSync(path.join(webRoot, file), 'utf8');
       if (file === 'index.html') content = content.replace('</body>', '<div style="position:fixed;bottom:8px;left:8px;z-index:100;font:11px/1.5 sans-serif;padding:5px 9px;border:1px solid #ccd6e5;border-radius:6px;background:#fff;color:#53637b;pointer-events:none">界面预览 · 演示数据</div></body>');
       const types = { html: 'text/html', css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml' };

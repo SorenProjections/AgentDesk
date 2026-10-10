@@ -20,6 +20,8 @@
 
 ## 能做什么
 
+新增 **任务督导**：保存目标、约束和验收标准，核验会话与项目目录，读取阶段产物，执行质量检查，管理有限轮次纠偏，并用文件占用阻止重叠任务。支持从 Codex 对话通过本机脚本或 MCP 调用；详见 [任务督导指南](docs/supervision.md)与 [MCP 接入说明](docs/mcp.md)。
+
 | 功能 | 用途 |
 | --- | --- |
 | 定时发送 | 预先写好提示词，在指定的北京时间发送；支持多个一次性时间点 |
@@ -35,7 +37,7 @@
 
 ## 快速开始
 
-主要运行环境为 **Windows + Node.js 22.13 或更新版本**。项目没有需要安装的 npm 依赖。原生会话读取使用 Node.js 内置 SQLite，因此需要支持无启动标志加载该模块的版本；参见 [Node.js SQLite 文档](https://nodejs.org/download/release/v22.13.1/docs/api/sqlite.html)。
+主要运行环境为 **Windows + Node.js 22.13 或更新版本**。调度器核心没有需要安装的 npm 依赖；可选 MCP 子包按 [MCP 接入说明](docs/mcp.md)单独安装。原生会话读取使用 Node.js 内置 SQLite，因此需要支持无启动标志加载该模块的版本；参见 [Node.js SQLite 文档](https://nodejs.org/download/release/v22.13.1/docs/api/sqlite.html)。
 
 下载源码后，在项目目录执行 `npm start`；也可以克隆仓库后启动：
 

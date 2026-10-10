@@ -11,7 +11,7 @@ npm test
 npm run preview
 ```
 
-项目没有需要安装的 npm 依赖。`npm run preview` 使用内存演示数据，适合修改界面；不会连接真实 Agent。开发后台时使用 `npm run serve`，这会连接本机客户端并按当前配置调度任务。需要隔离时，先把 `CODEX_SCHEDULER_DATA` 指向新的测试目录，并使用单独的 `CODEX_SCHEDULER_PORT`。
+调度器核心没有需要安装的 npm 依赖。可选 MCP 子包需先执行 `npm --prefix mcp ci --ignore-scripts`，并用 `npm run test:mcp` 验证。`npm run preview` 使用内存演示数据，适合修改界面；不会连接真实 Agent。开发后台时使用 `npm run serve`，这会连接本机客户端并按当前配置调度任务。需要隔离时，先把 `CODEX_SCHEDULER_DATA` 指向新的测试目录，并使用单独的 `CODEX_SCHEDULER_PORT`。
 
 ## 提交改动
 

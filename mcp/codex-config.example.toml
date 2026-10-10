@@ -1,0 +1,14 @@
+# Merge this block into the trusted workspace's .codex/config.toml.
+# Replace the project path. Absolute Node executable paths are recommended on Windows.
+[mcp_servers.agentdesk]
+command = "node"
+args = ["C:/path/to/AgentDesk/mcp/server.mjs"]
+cwd = "C:/path/to/AgentDesk"
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 900
+
+[mcp_servers.agentdesk.env]
+CODEX_SCHEDULER_URL = "http://127.0.0.1:43127"
+# Set 0 to require the backend to be started manually.
+CODEX_SCHEDULER_AUTOSTART = "1"

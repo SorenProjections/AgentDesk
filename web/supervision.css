@@ -1,0 +1,13 @@
+.supervision-layout {display:grid;grid-template-columns:minmax(210px,280px) minmax(0,1fr);gap:24px;margin:24px 0}
+.supervision-list,.supervision-detail,.supervision-leases {background:var(--surface,#fff);border:1px solid var(--border,#dfe3e8);border-radius:12px;padding:20px}
+.supervision-list-item {display:block;width:100%;text-align:left;margin:10px 0;white-space:normal}
+.supervision-detail p {white-space:pre-wrap;overflow-wrap:anywhere}
+.supervision-field {display:flex;flex-direction:column;gap:7px;margin:15px 0;font-weight:500}
+.supervision-field input,.supervision-field textarea,.supervision-field select {width:100%;min-width:0}
+.supervision-field input[type=checkbox] {width:20px;height:20px}
+.supervision-criterion,.supervision-check {border:1px solid #dfe3e8;border-radius:8px;padding:14px;margin:16px 0;min-width:0}
+.supervision-actions {display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.supervision-error {color:#b42318}
+.supervision-detail pre {max-height:360px;overflow:auto;padding:12px;background:#f5f7fa;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.supervision-detail details {margin-top:18px}
+@media(max-width:850px){.supervision-layout{grid-template-columns:1fr}.supervision-list{max-height:250px;overflow:auto}.supervision-detail{padding:16px}}

@@ -1,6 +1,9 @@
 # Local tasks, prompts, replies, notifications, and scratch work
 /data/
 /work/
+/task_plan.md
+/findings.md
+/progress.md
 *.log
 *.pid
 *.pid.lock

@@ -13,6 +13,8 @@ import { SystemIntegration } from './lib/system.mjs';
 import { NativeCodexObserver } from './lib/native-codex.mjs';
 import { NativeWorkBuddyObserver } from './lib/native-workbuddy.mjs';
 import { SessionHub } from './lib/sessions.mjs';
+import { Supervision } from './lib/supervision.mjs';
+import { supervisionRoutes } from './lib/supervision-routes.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.CODEX_SCHEDULER_PORT || 43127);
@@ -61,7 +63,9 @@ const sessions = new SessionHub(store, { sources: [
     } };return source;
   }),
 ], notifier: (title, detail) => system.notify(title, detail, origin + '/#sessions') });
-const snapshot = () => ({ ...scheduler.snapshot(), system: system.snapshot(), sessionHub: sessions.snapshot() });
+const supervision = new Supervision(store, scheduler, { sessionRows: () => sessions.snapshot().sessions });
+supervision.on('change', () => scheduler.emit('change'));
+const snapshot = () => ({ ...scheduler.snapshot(), system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
 let shuttingDown = false;
 let pickingFolder = false;
 
@@ -134,6 +138,8 @@ const assets = {
   '/workspace.js': ['workspace.js', 'text/javascript; charset=utf-8'],
   '/providers-view.js': ['providers-view.js', 'text/javascript; charset=utf-8'],
   '/sessions-view.js': ['sessions-view.js', 'text/javascript; charset=utf-8'],
+  '/supervision-view.js': ['supervision-view.js', 'text/javascript; charset=utf-8'],
+  '/supervision.css': ['supervision.css', 'text/css; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
   '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
 };
@@ -160,6 +166,9 @@ const server = http.createServer(async (request, response) => {
     if (!['GET', 'HEAD'].includes(request.method) && (request.headers.origin !== origin || request.headers['x-scheduler-request'] !== '1')) return send(response, 403, { error: '请在本机面板中执行此操作。' });
 
     if (request.method === 'GET' && url.pathname === '/api/state') return send(response, 200, snapshot());
+    if (url.pathname.startsWith('/api/supervision')) {
+      if (await supervisionRoutes(request, response, url, { supervision, body, send })) return;
+    }
     if (request.method === 'POST' && url.pathname === '/api/sessions/sync') { await sessions.refresh(); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/sessions/settings') { sessions.configure(await body(request)); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/notifications/test') {
@@ -272,6 +281,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/shutdown') {
       if (scheduler.maintenance) return send(response, 409, { error: 'Agent 正在验证接入，请等待验证结束再停止后台。' });
       if (scheduler.active) return send(response, 409, { error: '有任务正在运行，请先停止运行，再关闭后台。' });
+      if (supervision.jobs.size) return send(response, 409, { error: '正在收集验收证据，请等待结束后再关闭后台。' });
       send(response, 200, { ok: true });
       void shutdown();
       return;
@@ -287,6 +297,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   scheduler.stop();
+  await supervision.close();
   sessions.close();
   nativeWorkBuddy.close();
   system.close();
