@@ -148,3 +148,17 @@ test('desktop recovery refuses missing acknowledgements or a different turn', as
   const result2 = await wb.resume({ cwd: process.cwd(), timeoutMinutes: 1 }, { id: 'original', threadId: 'chat', startedAt: Date.now(), logs: [{ text: '消息已发送到 WorkBuddy 桌面对话。' }] }, {}).completion;
   assert.equal(result2.status, 'uncertain'); assert.match(result2.error, /请求编号/);
 });
+
+test('Antigravity recovery uses stable input cursor when its timestamp settles after submission', async () => {
+  const ag = new AntigravityDesktop(), run = { threadId: 'chat', desktopMonitor: {
+    phase: 'sent', offset: 3, turnVersion: 'initial-timestamp', deadline: Date.now() + 10000 } };
+  ag.inspect = async () => ({ cwd: process.cwd(), version: 'settled-timestamp', status: 'idle', steps: 5,
+    summary: { lastUserInputStepIndex: 3 } });
+  ag.result = async (id, offset) => { assert.equal(id, 'chat'); assert.equal(offset, 3); return { status: 'completed', output: 'Original result' }; };
+  let output;
+  assert.equal((await ag.resume({ cwd: process.cwd() }, run, { output: value => output = value }).completion).status, 'completed');
+  assert.equal(output, 'Original result');
+  ag.inspect = async () => ({ cwd: process.cwd(), version: 'initial-timestamp', status: 'running', steps: 7,
+    summary: { lastUserInputStepIndex: 6 } });
+  assert.equal((await ag.resume({ cwd: process.cwd() }, run, {}).completion).status, 'uncertain');
+});
