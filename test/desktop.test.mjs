@@ -23,7 +23,7 @@ test('a desktop execution error can be a DONE step and must fail the queue',asyn
   p.rpc=async()=>({steps:[{status:'CORTEX_STEP_STATUS_DONE',plannerResponse:{response:'done'}}]});
   assert.equal((await p.result('test',0)).status,'completed');
   p.rpc=async()=>({steps:[{status:'CORTEX_STEP_STATUS_RUNNING',plannerResponse:{response:'partial'}}]});
-  assert.equal((await p.result('test',0)).status,'uncertain');
+  assert.equal((await p.result('test',0)).status,'running');
 });
 
 function fixture(t){

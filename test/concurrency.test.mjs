@@ -162,3 +162,47 @@ test('Antigravity recovery uses stable input cursor when its timestamp settles a
     summary: { lastUserInputStepIndex: 6 } });
   assert.equal((await ag.resume({ cwd: process.cwd() }, run, {}).completion).status, 'uncertain');
 });
+
+test('explicit monitor recovery keeps the original run, instruction and lease and never resends', async t => {
+  const f = fixture(t), p = desktop('antigravityDesktop'); f.scheduler.providers.set(p.id, p);
+  const supervisor = new Supervision(f.store, f.scheduler); t.after(() => supervisor.close());
+  const m = await supervisor.create({ title: 'Background research', objective: 'Finish research', cwd: f.cwd, provider: p.id,
+    constraints: ['Only isolated scope'], criteria: [{ id: 'review', type: 'manual', description: 'Review' }], writePaths: ['research/background'] });
+  await supervisor.dispatch(m.id, { requestId: 'one-start' }); await f.scheduler.tick();
+  const run = f.store.data.runs[0], lease = f.store.data.fileLeases[0];
+  p.jobs[0].finish({ status: 'uncertain', error: 'Desktop summary idle with a pending command' });
+  await new Promise(r => setImmediate(r));
+  assert.equal(supervisor.get(m.id).state, 'uncertain'); assert.equal(lease.state, 'held');
+  p.canResume = () => true; p.recoveryState = async () => 'running';
+  let resumes = 0; p.resume = () => { resumes++; return { completion: new Promise(() => {}), interrupt: async () => {} }; };
+  await Promise.all([f.scheduler.resumeDesktopMonitor(run.id), f.scheduler.resumeDesktopMonitor(run.id)]);
+  assert.equal(resumes, 1); assert.equal(p.jobs.length, 1); assert.equal(f.store.data.runs.length, 1);
+  assert.equal(run.status, 'running'); assert.equal(supervisor.get(m.id).state, 'running'); assert.equal(lease.runId, run.id);
+  assert.equal(supervisor.get(m.id).instructions[0].runId, run.id); assert.equal(supervisor.get(m.id).instructions[0].state, 'running');
+  assert.equal(f.store.data.settings.queuePaused, true); // Recovering a run does not silently resume the global queue.
+});
+
+test('Antigravity background steps keep monitoring even when its summary is idle', async () => {
+  const p = new AntigravityDesktop(); let resultCalls = 0;
+  p.inspect = async () => ({ cwd: process.cwd(), status: 'idle', version: 'settled', steps: 5, summary: { lastUserInputStepIndex: 0 } });
+  p.result = async () => ++resultCalls === 1 ? { status: 'running', output: 'Starting background script' } : { status: 'completed', output: 'Finished original request' };
+  const run = { threadId: 'chat', desktopMonitor: { phase: 'sent', offset: 0, turnVersion: 'initial', deadline: Date.now() + 10000 } };
+  let output;
+  const result = await p.resume({ cwd: process.cwd() }, run, { output: value => output = value }).completion;
+  assert.equal(resultCalls, 2); assert.equal(result.status, 'completed'); assert.equal(output, 'Finished original request');
+  p.result = async () => ({ status: 'running' });
+  assert.equal(await p.recoveryState({ cwd: process.cwd() }, run), 'running');
+  p.result = async () => ({ status: 'completed' });
+  assert.equal(await p.recoveryState({ cwd: process.cwd() }, run), 'completed');
+  p.result = async () => ({ status: 'uncertain' });
+  await assert.rejects(p.recoveryState({ cwd: process.cwd() }, run), /证据/);
+});
+
+test('Antigravity session results do not cache a running background step as a final state', async () => {
+  const p = new AntigravityDesktop(); p.available = true; let calls = 0;
+  p.summaries = async () => ({ chat: { status: 'CASCADE_RUN_STATUS_IDLE', lastUserInputTime: 'same-time', stepCount: 5, lastUserInputStepIndex: 0 } });
+  p.result = async () => ++calls === 1 ? { status: 'running', output: 'Still working' } : { status: 'completed', output: 'Done' };
+  assert.equal((await p.listSessions())[0].status, 'running');
+  assert.equal((await p.listSessions())[0].status, 'completed');
+  assert.equal(calls, 2);
+});

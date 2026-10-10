@@ -274,6 +274,11 @@ const server = http.createServer(async (request, response) => {
         return send(response, 200, { id: run.id, status: run.status, error: run.error });
       }
     }
+    const monitorMatch = url.pathname.match(/^\/api\/runs\/([a-zA-Z0-9-]+)\/resume-monitor$/);
+    if (request.method === 'POST' && monitorMatch) {
+      const run = await scheduler.resumeDesktopMonitor(monitorMatch[1]);
+      return send(response, 200, { id: run.id, status: run.status, error: run.error });
+    }
     const interruptMatch = url.pathname.match(/^\/api\/runs\/([a-zA-Z0-9-]+)\/interrupt$/);
     if (request.method === 'POST' && interruptMatch) { await scheduler.interrupt(interruptMatch[1]); return send(response, 200, { ok: true }); }
     const responseMatch = url.pathname.match(/^\/api\/requests\/([a-zA-Z0-9-]+)\/respond$/);
