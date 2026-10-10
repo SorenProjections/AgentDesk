@@ -9,7 +9,7 @@ import { Store } from '../lib/store.mjs';
 import { Scheduler } from '../lib/scheduler.mjs';
 import { Supervision } from '../lib/supervision.mjs';
 import { FileLeases, scopedPath } from '../lib/file-leases.mjs';
-import { artifact, runCommand } from '../lib/evidence.mjs';
+import { artifact, runCommand, manifest } from '../lib/evidence.mjs';
 import { ControlClient } from '../lib/control-client.mjs';
 import { supervisionRoutes } from '../lib/supervision-routes.mjs';
 const scratch = path.resolve(process.env.CODEX_SCHEDULER_TEST_DATA || path.join(path.dirname(fileURLToPath(import.meta.url)), '../work/supervision-tests'));
@@ -80,12 +80,78 @@ test('rejects traversal and escape through a junction even for missing files', t
   symlinkSync(outside, path.join(f.folder, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => scopedPath(f.folder, 'link/not-created.txt'), /跳出了/);
 });
-test('blocks native active sessions not dispatched by the scheduler', async t => {
+test('active controller and research chats sharing cwd do not block an isolated task', async t => {
   const f = fixture(t, { sessionRows: () => [{ provider: 'workbuddyDesktop', nativeId: 'external', cwd: f.folder, status: 'running', name: 'Native task' }] });
   const m = await f.supervisor.create(f.draft);
   const queued = await f.supervisor.dispatch(m.id);
-  assert.match(f.scheduler.readiness(f.scheduler.getTask(queued.instruction.taskId)).reason, /其他客户端/);
-  await f.scheduler.tick(); assert.equal(f.client.turn, 0); assert.equal(f.store.data.runs.length, 0);
+  assert.equal(f.supervisor.blocker(f.scheduler.getTask(queued.instruction.taskId)), null);
+  await f.scheduler.tick(); assert.equal(f.client.turn, 1); assert.equal(f.store.data.runs.length, 1);
+  assert.equal(f.supervisor.get(m.id).sharedWorkspaceActivity[0].threadId, 'external');
+});
+test('explicit overlapping leases still block while sibling task directories share cwd', async t => {
+  const f = fixture(t, { sessionRows: () => [{ provider: 'workbuddyDesktop', nativeId: 'external', cwd: f.folder, status: 'running' }] });
+  f.supervisor.leases.acquire({ owner: 'other-mission', provider: 'workbuddyDesktop', threadId: 'external', cwd: f.folder,
+    paths: ['research_runs/other'], access: 'write' });
+  assert.deepEqual(f.supervisor.checkConflicts('mine', f.folder, ['research_runs/mine'], 'write', 'codex', null), []);
+  assert.throws(() => f.supervisor.checkConflicts('mine', f.folder, ['research_runs/other/file.csv'], 'write', 'codex', null), /文件占用冲突/);
+});
+test('busy target session still waits even though other active chats are advisory', async t => {
+  const f = fixture(t, { sessionRows: () => [{ provider: 'codex', nativeId: 'mock-session', cwd: f.folder, status: 'running' }] });
+  const m = await f.supervisor.create({ ...f.draft, threadId: 'mock-session' });
+  const queued = await f.supervisor.dispatch(m.id);
+  assert.match(f.supervisor.blocker(f.scheduler.getTask(queued.instruction.taskId)), /目标会话仍在运行/);
+  await f.scheduler.tick(); assert.equal(f.client.turn, 0);
+});
+test('desktop probing at startup waits without claiming or failing an instruction', async t => {
+  const f = fixture(t); let available = false;
+  f.scheduler.providers.set('workbuddyDesktop', { snapshot: () => ({ available }) });
+  const m = await f.supervisor.create({ ...f.draft, provider: 'workbuddyDesktop' });
+  const queued = await f.supervisor.dispatch(m.id);
+  assert.match(f.supervisor.blocker(f.scheduler.getTask(queued.instruction.taskId)), /等待目标桌面连接就绪/);
+  await f.scheduler.tick(); assert.equal(f.store.data.runs.length, 0); assert.equal(f.supervisor.get(m.id).state, 'scheduled');
+  available = true; assert.equal(f.supervisor.blocker(f.scheduler.getTask(queued.instruction.taskId)), null);
+  assert.equal(f.supervisor.get(m.id).instructions.length, 1);
+});
+test('independent research output changes do not contaminate evidence or stale its review', async t => {
+  const f = fixture(t);
+  mkdirSync(path.join(f.folder, 'research_runs', 'mine'), { recursive: true });
+  mkdirSync(path.join(f.folder, 'research_runs', 'other'), { recursive: true });
+  writeFileSync(path.join(f.folder, 'research_runs', 'other', 'results.csv'), 'old');
+  const own = 'research_runs/mine/report.md';
+  const { id } = await execute(f, { writePaths: ['research_runs/mine'], artifacts: [own], criteria: [
+    { id: 'report', type: 'file', path: own, description: 'Report exists' },
+    { id: 'quality', type: 'manual', description: 'Review own results' }
+  ] });
+  writeFileSync(path.join(f.folder, own), 'Own actual result');
+  writeFileSync(path.join(f.folder, 'research_runs', 'other', 'results.csv'), 'other research update');
+  f.client.complete(); const packet = await f.supervisor.evidence(id);
+  assert.deepEqual(packet.changes.map(c => c.path), [own]); assert.deepEqual(packet.outOfScopeChanges, []);
+  assert.equal(packet.unattributedChanges[0].path, 'research_runs/other/results.csv');
+  assert.equal(f.supervisor.get(id).state, 'review_pending');
+  writeFileSync(path.join(f.folder, 'research_runs', 'other', 'results.csv'), 'later other update');
+  await f.supervisor.review(id, { evidenceId: packet.id, reason: 'Reviewed own report',
+    decisions: [{ criterionId: 'quality', status: 'passed', reason: 'Report evidence meets criteria' }] });
+  assert.equal(f.supervisor.get(id).state, 'accepted');
+});
+test('an incomplete scan in another research directory does not invalidate scoped acceptance', async t => {
+  const f = fixture(t), outside = mkdtempSync(path.join(scratch, 'elsewhere-'));
+  symlinkSync(outside, path.join(f.folder, 'other-research-link'), process.platform === 'win32' ? 'junction' : 'dir');
+  const { id } = await execute(f);
+  writeFileSync(path.join(f.folder, 'result.txt'), 'Expected'); f.client.complete();
+  const packet = await f.supervisor.evidence(id);
+  assert.equal(packet.workspaceScanComplete, false); assert.equal(packet.scanComplete, true);
+  assert.equal(packet.baselineComplete, true); assert.equal(f.supervisor.get(id).state, 'accepted');
+});
+test('historical full-workspace baseline is projected without inventing outside deletions', async t => {
+  const f = fixture(t);
+  writeFileSync(path.join(f.folder, 'unrelated.txt'), 'Existing');
+  const { id } = await execute(f);
+  f.supervisor.get(id).baseline = manifest(f.folder, ['.']);
+  writeFileSync(path.join(f.folder, 'result.txt'), 'Expected');
+  const observed = await f.supervisor.observe(id);
+  assert.deepEqual(observed.changes.map(c => c.path), ['result.txt']);
+  f.client.complete(); const packet = await f.supervisor.evidence(id);
+  assert.deepEqual(packet.changes.map(c => c.path), ['result.txt']);
 });
 test('collects actual changes, binds created session and releases after acceptance', async t => {
   const f = fixture(t), { id } = await execute(f);
@@ -136,8 +202,8 @@ test('restart preserves uncertain ownership and sent history without replay', as
   assert.equal(restored.get(id).state, 'uncertain'); assert.equal(restored.get(id).instructions.length, 1);
   assert.equal(restored.snapshot().leases.length, 1); await scheduler.tick(); assert.equal(client.turn, 0);
 });
-test('detects out of scope writes despite a passing criterion', async t => {
-  const f = fixture(t), { id } = await execute(f);
+test('detects selected artifact writes outside declared write scope despite a passing criterion', async t => {
+  const f = fixture(t), { id } = await execute(f, { artifacts: ['result.txt', 'outside.txt'] });
   writeFileSync(path.join(f.folder, 'result.txt'), 'OK'); writeFileSync(path.join(f.folder, 'outside.txt'), 'Unauthorized');
   f.client.complete(); const packet = await f.supervisor.evidence(id);
   assert.equal(packet.outOfScopeChanges[0].path, 'outside.txt'); assert.equal(f.supervisor.get(id).state, 'blocked');
@@ -224,7 +290,7 @@ test('actual failing command results cannot be overridden by a manual acceptance
   assert.equal(f.supervisor.get(id).state, 'correction_needed');
 });
 test('incomplete scans keep their original limitations after an explicit acknowledgment', async t => {
-  const f = fixture(t), { id } = await execute(f, { criteria: [{ id: 'quality', type: 'manual', description: 'Review quality' }] });
+  const f = fixture(t), { id } = await execute(f, { writePaths: ['.'], criteria: [{ id: 'quality', type: 'manual', description: 'Review quality' }] });
   mkdirSync(path.join(f.folder, 'sub'));
   symlinkSync(path.join(f.folder, 'sub'), path.join(f.folder, 'linked-sub'), process.platform === 'win32' ? 'junction' : 'dir');
   f.client.complete(); const packet = await f.supervisor.evidence(id);

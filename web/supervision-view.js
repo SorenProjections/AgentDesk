@@ -156,6 +156,11 @@ async function renderDetail(m) {
     for (const a of packet.artifacts) evidence.append(element('h4', '', a.path + ' · ' + a.status), element('pre', '', a.text || '没有可读取的文本'));
     for (const a of packet.changedFilePreviews || []) if (!packet.artifacts.some(p => p.path === a.path)) evidence.append(element('h4', '', '修改文件：' + a.path), element('pre', '', a.text || '没有可读取的文本'));
     evidence.append(element('pre', '', packet.git.diff || '无 Git 差异记录')); detail.append(evidence);
+    if (packet.unattributedChanges?.length) {
+      const elsewhere = element('details'); elsewhere.append(element('summary', '', '工作空间其他变化（未归因于本任务）'));
+      elsewhere.append(element('p', '', '其他独立研究可能同时写入各自目录，这些变化不作为当前任务的越界或验收失败依据。'),
+        element('pre', '', JSON.stringify(packet.unattributedChanges, null, 2))); detail.append(elsewhere);
+    }
   }
   const history = element('details'); history.append(element('summary', '', '指令与轮次记录（' + m.instructions.length + '）'));
   for (const i of m.instructions) history.append(element('h4', '', '第 ' + i.round + ' 轮 · ' + i.state),
@@ -173,7 +178,7 @@ async function refresh(force = false) {
     for (const m of snapshot.missions) list.append(button(m.title + ' · ' + labels[m.state], async () => {
       selected = m.id; detailKey = '';
     }, selected === m.id ? 'primary supervision-list-item' : 'secondary supervision-list-item'));
-    leaseList.replaceChildren(element('p', '', '所有通过调度器发送的任务共用占用记录；不确定的运行会保留占用。外部活动会话按整个项目保守检查。此保护不能禁止绕过调度器的手动修改。'));
+    leaseList.replaceChildren(element('p', '', '占用按任务声明的文件范围判断。共用项目目录或存在其他活动聊天不会锁住整个项目；独立研究使用独立产物目录。不确定的实际占用仍保留，此保护不能禁止手动修改。'));
     for (const lease of snapshot.leases) leaseList.append(element('p', '', lease.provider + ' · ' + lease.cwd + ' · ' + lease.paths.join('、') + ' · ' + lease.access));
     if (selected) {
       const m = await api('supervision/missions/' + selected);

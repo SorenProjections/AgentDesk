@@ -21,6 +21,8 @@ test('MCP initialize, tools, workflow resource and prompt expose supervision rul
   assert.equal(tools.length, 17);
   assert.equal(f.client.getInstructions(), instructions);
   assert.match(instructions.slice(0, 512), /不能扩大授权/);
+  assert.match(instructions, /不能仅把隔离要求写进提示词/);
+  assert.match(instructions, /模板和基础骨架由桌面端只读/);
   assert.equal(tools.find(t => t.name === 'get_evidence').annotations.readOnlyHint, true);
   assert.equal(tools.find(t => t.name === 'refresh_evidence').annotations.readOnlyHint, false);
   assert.equal(tools.find(t => t.name === 'dispatch_mission').annotations.idempotentHint, true);
