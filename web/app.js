@@ -290,7 +290,7 @@ function renderTaskActions() {
   $('cancelEdit').hidden = editingId !== task.id;
   $('followTask').disabled = editingId === task.id;
   $('deleteTask').disabled = busy;
-  $('runTask').disabled = task.paused || !!state.activeRunId || editingId === task.id || (task.trigger?.type !== 'time' && task.queueStatus?.status !== 'ready');
+  $('runTask').disabled = task.paused || state.runs.some(r => r.taskId === task.id && ['dispatching','running','waiting'].includes(r.status)) || task.queueStatus?.status === 'blocked' || editingId === task.id || (task.trigger?.type !== 'time' && task.queueStatus?.status !== 'ready');
   $('saveHint').textContent = editingId === task.id ? '正在编辑，这条消息暂不发送；保存后释放' : task.paused ? '任务已暂停' : '点击“编辑消息”修改尚未发送的内容';
   $('editorTitle').textContent=editingId===task.id?'编辑任务':'任务详情';
   $('taskReadiness').hidden=!task.queueStatus?.reason;
@@ -508,7 +508,7 @@ $('runTask').addEventListener('click', async () => {
     await refreshState();
     if (run.error) toast(run.error, true);
   } catch (error) { toast(error.message, true); }
-  finally { $('runTask').disabled = !!state.activeRunId; }
+  finally { renderTaskActions(); }
 });
 $('deleteTask').addEventListener('click', async () => {
   if (!await confirmAction('删除这条任务及其未来发送时间。已有运行记录会保留。',{title:'删除任务',accept:'删除任务',danger:true})) return;

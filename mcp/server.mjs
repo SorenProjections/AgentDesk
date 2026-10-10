@@ -52,7 +52,7 @@ export function createServer({ gateway = new BackendGateway(), sleep = delay, no
   }
   tool('status', '检查调度服务、桌面客户端连通状态、正在执行的运行和督导任务。配置允许时会启动未运行的本机后台。', {}, async () => {
     const s = await gateway.request('state');
-    return { serverTime: s.serverTime, timezone: s.timezone, activeRunId: s.activeRunId,
+    return { serverTime: s.serverTime, timezone: s.timezone, activeRunId: s.activeRunId, activeRunIds: s.activeRunIds || [],
       providers: s.providers?.map(({ id, name, available, detail }) => ({ id, name, available, detail })), supervision: s.supervision };
   });
   tool('list_sessions', '按客户端和指定目录查真实会话，作为绑定依据；中文“反重力”使用 antigravityDesktop，WorkBuddy 使用 workbuddyDesktop。',
