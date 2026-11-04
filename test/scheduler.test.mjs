@@ -49,6 +49,91 @@ function fixture(t) {
     draft: { title: 'One shot', cwd: folder, threadMode: 'new', prompt: 'Run this once', times: [now + 10000] } };
 }
 
+test('daily schedules serialize, survive restart, and keep manual runs separate', async t => {
+  const f = fixture(t);
+  f.setNow(Date.parse('2026-11-05T08:59:00+08:00'));
+  const task = await f.scheduler.saveTask({ ...f.draft, times: [], trigger: {type:'time', recurrence:{frequency:'daily',time:'09:00'}} });
+  const first = Date.parse('2026-11-05T09:00:00+08:00');
+  assert.equal(task.times[0].at, first);
+  await f.scheduler.runNow(task.id);
+  assert.equal(task.times[0].state, 'pending');
+  f.client.complete();
+  f.setNow(first);
+  await Promise.all([f.scheduler.tick(), f.scheduler.tick()]);
+  assert.equal(f.client.nextTurn, 2);
+  assert.equal(task.times.find(slot => slot.state === 'pending').at, first + 86400000);
+  f.setNow(first + 86400000);
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 2, 'previous day is still active');
+  f.client.complete();
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 3);
+  f.client.complete();
+  f.scheduler.stop();
+  const restarted = new Scheduler(new Store(f.store.file), f.client, { clock: f.now });
+  t.after(() => restarted.stop());
+  await restarted.tick();
+  assert.equal(f.client.nextTurn, 3);
+  f.setNow(first + 2 * 86400000);
+  await restarted.tick();
+  assert.equal(f.client.nextTurn, 4);
+  assert.equal(restarted.getTask(task.id).times.filter(slot => slot.state === 'pending').length, 1);
+  f.client.complete();
+});
+
+test('weekly repeat edits preserve a pending occurrence and pause/catch-up sends only once', async t => {
+  const f = fixture(t);
+  f.setNow(Date.parse('2026-11-05T12:00:00+08:00'));
+  const input = {...f.draft, times:[], trigger:{type:'time',recurrence:{frequency:'weekly',time:'09:00',weekdays:[1,3,5]}}};
+  let task = await f.scheduler.saveTask(input);
+  const pendingId = task.times[0].id;
+  f.scheduler.pause(task.id, true);
+  f.setNow(Date.parse('2026-11-18T12:00:00+08:00'));
+  task = await f.scheduler.saveTask({...input, prompt:'Updated recurring message'}, task.id);
+  assert.equal(task.times[0].id, pendingId);
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 0);
+  f.scheduler.pause(task.id, false);
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 1);
+  f.client.complete();
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 1, 'does not replay the missed week');
+  assert.equal(task.times.find(slot => slot.state === 'pending').at, Date.parse('2026-11-20T09:00:00+08:00'));
+  assert.equal(f.client.calls.find(call => call.method === 'turn/start').params.input[0].text, 'Updated recurring message');
+  task = await f.scheduler.saveTask({...input,trigger:{type:'time',recurrence:{frequency:'weekly',time:'10:00',weekdays:[0]}}}, task.id);
+  assert.equal(task.times.find(slot => slot.state === 'pending').at, Date.parse('2026-11-22T10:00:00+08:00'));
+  assert.equal(task.times.find(slot => slot.id === pendingId).state, 'completed');
+  task = await f.scheduler.saveTask({...f.draft, times:[f.now()+1000], trigger:{type:'time'}}, task.id);
+  assert.equal(task.trigger.recurrence, undefined);
+  f.setNow(f.now()+1000);
+  await f.scheduler.tick();
+  f.client.complete();
+  assert.equal(f.scheduler.hasPending(task), false);
+});
+
+test('recurring skip policy advances without sending; crash claims are never resent', async t => {
+  const f = fixture(t);
+  f.setNow(Date.parse('2026-11-05T08:00:00+08:00'));
+  const task = await f.scheduler.saveTask({...f.draft,times:[],latePolicy:'skip',trigger:{type:'time',recurrence:{frequency:'daily',time:'09:00'}}});
+  f.setNow(Date.parse('2026-11-10T10:00:00+08:00'));
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 0);
+  assert.equal(task.times[0].state, 'missed');
+  assert.equal(task.times[1].at, Date.parse('2026-11-11T09:00:00+08:00'));
+  f.setNow(task.times[1].at);
+  await f.scheduler.tick();
+  f.scheduler.stop();
+  const store = new Store(f.store.file);
+  const restarted = new Scheduler(store, f.client, {clock:f.now});
+  t.after(() => restarted.stop());
+  await restarted.tick();
+  assert.equal(f.client.nextTurn, 1);
+  assert.equal(restarted.getTask(task.id).paused, true);
+  assert.equal(store.data.runs[0].status, 'uncertain');
+  assert.equal(restarted.getTask(task.id).times.filter(slot => slot.state === 'pending').length, 1);
+});
+
 test('one-shot time creates one turn and never fires again after completion or restart', async t => {
   const f = fixture(t);
   const task = await f.scheduler.saveTask(f.draft);

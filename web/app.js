@@ -9,7 +9,7 @@ const editToken = crypto.randomUUID();
 let editingId = null;
 let editingRevision = null;
 let editTimer = null;
-const hasPending = task => task.trigger?.type && task.trigger.type !== 'time' ? task.trigger.state === 'pending' : task.times.some(slot => slot.state === 'pending');
+const hasPending = task => task.trigger?.type && task.trigger.type !== 'time' ? task.trigger.state === 'pending' : !!task.trigger?.recurrence || task.times.some(slot => slot.state === 'pending');
 const activeStates = new Set(['dispatching', 'running', 'waiting']);
 let state = { tasks: [], runs: [], requests: [], connection: { connected: false, defaults: {} } };
 let selectedTaskId = null;
@@ -99,9 +99,10 @@ function renderTaskList() {
     content.append(folder);
     const bottom = element('span', 'task-bottom');
     const next = task.times.find(slot => slot.state === 'pending');
+    const repeatLabel = task.trigger?.recurrence ? `${task.trigger.recurrence.frequency === 'daily' ? '每天' : '每周'} · ` : '';
     const status = taskStatus(task);
     top.append(element('span','badge '+status,names[status]));
-    bottom.append(element('span', 'task-date', hasPending(task) ? (task.trigger?.type === 'afterTask' ? '等待 ' + (state.tasks.find(parent => parent.id === task.trigger.taskId)?.title || '前置任务') : task.trigger?.type === 'afterConversation' ? '等待桌面对话' : next ? shortFormat.format(new Date(next.at)) : '轮到时发送') : '本次任务已结束'));
+    bottom.append(element('span', 'task-date', hasPending(task) ? (task.trigger?.type === 'afterTask' ? '等待 ' + (state.tasks.find(parent => parent.id === task.trigger.taskId)?.title || '前置任务') : task.trigger?.type === 'afterConversation' ? '等待桌面对话' : next ? repeatLabel + shortFormat.format(new Date(next.at)) : '轮到时发送') : '本次任务已结束'));
     content.append(bottom);
     if (['blocked','editing'].includes(task.queueStatus?.status)) content.append(element('span','task-reason',task.queueStatus.reason));
     button.append(element('span','queue-number',String(tasks.indexOf(task)+1).padStart(2,'0')),content);
@@ -156,6 +157,14 @@ function addTime(at = Math.ceil((Date.now() + serverOffset + 3600000) / 60000) *
 
 function updateSummary() {
   if ($('triggerType').value !== 'time') { $('scheduleSummary').textContent = $('triggerType').value === 'queue' ? '保存后加入队列，轮到时发送一次' : $('triggerType').value === 'afterConversation' ? '桌面端当前任务成功结束后发送一次' : '前置任务结束后发送一次'; return; }
+  if ($('repeatFrequency').value !== 'once') {
+    const days = [...document.querySelectorAll('input[name="weekday"]:checked')].map(input => input.parentElement.textContent);
+    const prefix = $('repeatFrequency').value === 'daily' ? '每天' : days.length ? `每周${days.map(day => day.slice(1)).join('、')}` : '请选择每周执行的星期';
+    const task = state.tasks.find(task => task.id === selectedTaskId);
+    const next = !editingId && task?.times.find(slot => slot.state === 'pending');
+    $('scheduleSummary').textContent = `${prefix} ${$('repeatTime').value || '请选择时间'}（北京时间）${next ? `；下次 ${formatDate(next.at)}` : ''}`;
+    return;
+  }
   const times = [...$('timeList').querySelectorAll('input')].filter(input => !input.disabled).map(input => parseTime(input.value)).filter(Number.isFinite).sort((a, b) => a - b);
   $('scheduleSummary').textContent = times.length ? `${formatDate(times[0])}${times.length > 1 ? `，共 ${times.length} 个时间` : '，仅执行一次'}` : '选择一个未来的执行时间';
 }
@@ -243,6 +252,9 @@ async function loadTask(task,{force=false}={}) {
   savedThread = task.threadId ? { id: task.threadId, name: task.threadTitle || task.title } : null;
   $('provider').value = task.provider || 'codex';
   $('triggerType').value = task.trigger?.type || 'time';
+  $('repeatFrequency').value = task.trigger?.recurrence?.frequency || 'once';
+  $('repeatTime').value = task.trigger?.recurrence?.time || '09:00';
+  document.querySelectorAll('input[name="weekday"]').forEach(input => { input.checked = !!task.trigger?.recurrence?.weekdays.includes(Number(input.value)); });
   rearmWatch.checked = false;
   if (task.trigger?.type === 'afterConversation') {
     watchProvider.value = task.trigger.provider;
@@ -269,7 +281,8 @@ async function loadTask(task,{force=false}={}) {
   renderProviderHelp();
   $('networkAccess').checked = task.networkAccess;
   $('timeList').replaceChildren();
-  task.times.forEach(slot => addTime(slot.at, slot.state));
+  if (task.trigger?.recurrence) addTime();
+  else task.times.forEach(slot => addTime(slot.at, slot.state));
   $('editorTitle').textContent = '任务详情';
   $('editorSubtitle').textContent = task.title;
   $('saveTask').textContent = '保存修改';
@@ -428,6 +441,7 @@ async function refreshState() {
     renderTaskList();
     renderTaskActions();
     renderRunOptions();
+    if (!editingId && !formDirty && state.tasks.find(task => task.id === selectedTaskId)?.trigger?.recurrence) updateSummary();
     workspace.update(state,hasPending);
     sessionsView.render(state.sessionHub);
     await refreshRun();
@@ -439,7 +453,8 @@ async function refreshState() {
 
 $('taskForm').addEventListener('submit', async event => {
   event.preventDefault();
-  const times = $('triggerType').value === 'time' ? [...$('timeList').querySelectorAll('input')].map(input => parseTime(input.value)) : [];
+  const repeating = $('triggerType').value === 'time' && $('repeatFrequency').value !== 'once';
+  const times = $('triggerType').value === 'time' && !repeating ? [...$('timeList').querySelectorAll('input')].map(input => parseTime(input.value)) : [];
   const threadId = $('provider').value === 'codex' || ['antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes($('provider').value) ? $('threadSelect').value : $('manualThread').value.trim() || $('threadSelect').value;
   const input = {
     provider: $('provider').value, revision: editingRevision, editToken, timeoutMinutes: Number($('timeoutMinutes').value),
@@ -450,8 +465,10 @@ $('taskForm').addEventListener('submit', async event => {
     sandbox: $('sandbox').value, approval: $('approval').value, latePolicy: $('latePolicy').value,
     model: $('model').value, effort: $('effort').value, networkAccess: $('networkAccess').checked,
   };
+  if (repeating) input.trigger.recurrence = { frequency: $('repeatFrequency').value, time: $('repeatTime').value, weekdays: [...document.querySelectorAll('input[name="weekday"]:checked')].map(input => Number(input.value)), timezone: 'Asia/Shanghai' };
   if (input.trigger.type === 'afterConversation') Object.assign(input.trigger, { provider: $('watchProvider').value, threadId: $('watchThread').value, rearm: rearmWatch.checked });
-  if ($('triggerType').value === 'time' && (!times.length || times.some(value => !Number.isFinite(value)))) return toast('请至少选择一个有效的执行时间。', true);
+  if ($('triggerType').value === 'time' && !repeating && (!times.length || times.some(value => !Number.isFinite(value)))) return toast('请至少选择一个有效的执行时间。', true);
+  if (repeating && input.trigger.recurrence.frequency === 'weekly' && !input.trigger.recurrence.weekdays.length) return toast('请至少选择一个星期。', true);
   $('saveTask').disabled = true;
   try {
     const task = await api(selectedTaskId ? 'tasks/' + selectedTaskId : 'tasks', selectedTaskId ? 'PUT' : 'POST', input);
@@ -583,13 +600,18 @@ function renderDependencyRuns(runId = '') {
 
 function toggleTrigger() {
   const kind = $('triggerType').value;
+  const repeating = kind === 'time' && $('repeatFrequency').value !== 'once';
   $('timeFields').hidden = kind !== 'time';
+  $('onceFields').hidden = repeating;
+  $('repeatFields').hidden = !repeating;
+  $('weekdayFields').hidden = $('repeatFrequency').value !== 'weekly';
+  $('repeatTime').required = repeating;
   $('dependencyFields').hidden = kind !== 'afterTask';
   $('watchFields').hidden = kind !== 'afterConversation';
   $('watchThread').required = kind === 'afterConversation';
   $('afterTask').required = kind === 'afterTask';
-  $('timeList').querySelectorAll('input').forEach(input => { input.required = kind === 'time'; });
-  $('triggerHelp').textContent = kind === 'time' ? '每个时间发送一次；发送前可编辑。' : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
+  $('timeList').querySelectorAll('input').forEach(input => { input.required = kind === 'time' && !repeating; });
+  $('triggerHelp').textContent = kind === 'time' ? (repeating ? '按北京时间持续重复，暂停或删除任务后停止。后台关闭或电脑睡眠时不能发送；恢复后最多补跑一次，或按高级设置跳过。' : '每个时间发送一次；发送前可编辑。') : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
   const previous = document.querySelector('input[name="threadMode"][value="previous"]');
   previous.disabled = $('provider').value === 'doubaoDesktop' || kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
   if (kind !== 'afterTask' && previous.checked) { document.querySelector('input[name="threadMode"][value="new"]').checked = true; toggleThreadMode(); }
@@ -664,6 +686,9 @@ $('followTask').addEventListener('click', async () => {
   toggleTrigger(); toggleThreadMode(); renderProviderHelp(); formDirty=true; $('prompt').focus();
 });
 $('triggerType').addEventListener('change', toggleTrigger);
+$('repeatFrequency').addEventListener('change', toggleTrigger);
+$('repeatTime').addEventListener('input', updateSummary);
+document.querySelectorAll('input[name="weekday"]').forEach(input => input.addEventListener('change', updateSummary));
 $('afterTask').addEventListener('change', () => renderDependencyRuns());
 $('provider').addEventListener('change', () => { savedThread = null; $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); });
 $('toggleQueue').addEventListener('click', async () => { try { await api('settings', 'POST', { queuePaused: !state.settings?.queuePaused }); await refreshState(); } catch (error) { toast(error.message, true); } });

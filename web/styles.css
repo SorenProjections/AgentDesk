@@ -341,6 +341,10 @@ body:has(dialog[open]) { overflow: hidden; }
 .checkbox-choice input { margin-top: 3px; }
 .condition-fields { background: #f7f9fc; border: 1px solid #e9eef5; border-radius: 8px; padding: 15px; margin-top: 13px; min-width: 0; }
 .condition-fields > label:first-child { margin-top: 0; }
+#onceFields { margin-top: 14px; }
+#weekdayFields { border: 0; padding: 0; margin: 16px 0 0; min-width: 0; }
+#weekdayFields legend { font-size: 12px; margin-bottom: 9px; }
+.weekday-choices { display: flex; flex-wrap: wrap; gap: 7px; }
 .time-row { margin-bottom: 12px; }
 .time-row-line { display: flex; align-items: center; gap: 8px; }
 .time-row input { flex: 1; min-width: 0; font-size: 12px; }
