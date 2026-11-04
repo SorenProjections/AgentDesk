@@ -43,6 +43,22 @@ test('source loss preserves last state and cannot create a completion; source fa
   f.hub.sources=[{id:'codex',name:'Codex',list:async()=>{if(!online)throw new Error('offline');return[{id:'one',name:'Native task',status:'running',version:'turn-1'}];}},{id:'other',name:'Other',list:async()=>[{id:'two',status:'idle',name:'Other'}]}];
   await f.hub.refresh();online=false;await f.hub.refresh();await f.hub.refresh();assert.equal(f.hub.snapshot().sources[1].available,true);assert.equal(f.store.data.sessions[0].status,'running');assert.equal(f.store.data.sessions[0].disconnected,true);assert.deepEqual(f.store.data.notifications.map(n=>n.kind),['disconnected']);
 });
+
+test('Doubao projects and connection publish before another source finishes its history scan',async t=>{
+  const f=fixture(t);let finish;
+  f.hub.sources=[{id:'slow',name:'Slow',list:()=>new Promise(resolve=>{finish=resolve;})},
+    {id:'doubaoDesktop',name:'豆包',list:async()=>[{id:'456',name:'Research chat',status:'idle',nativeProjectId:'project-1',nativeProjectName:'Research'}]}];
+  const refresh=f.hub.refresh();
+  await new Promise(resolve=>setImmediate(resolve));
+  const snapshot=f.hub.snapshot();
+  assert.equal(snapshot.syncing,true);
+  assert.equal(snapshot.sources.find(row=>row.id==='doubaoDesktop')?.available,true);
+  assert.equal(snapshot.sessions[0].nativeProjectName,'Research');
+  assert.equal(snapshot.sessions[0].disconnected,false);
+  assert.equal(new Store(f.store.file).data.sessions[0].nativeId,'456');
+  finish([]);await refresh;
+  assert.deepEqual(f.hub.snapshot().sources.map(row=>row.id),['slow','doubaoDesktop']);
+});
 test('queue/native mappings merge and completion does not double notify on the next native poll',async t=>{
   const f=fixture(t);f.ingest('idle');f.store.data.runs.push({id:'run-1',provider:'codex',threadId:'one',taskTitle:'Queued',taskId:'task',status:'running',startedAt:1700000000000});f.hub.syncRuns();
   f.advance();f.store.data.runs[0].status='completed';f.store.data.runs[0].endedAt=1700000010000;f.hub.syncRuns();assert.equal(f.store.data.notifications.length,1);assert.equal(f.store.data.sessions.length,1);
