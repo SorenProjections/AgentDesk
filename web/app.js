@@ -24,7 +24,24 @@ let formDirty = false;
 let refreshing = false;
 let refreshAgain = false;
 let serverOffset = 0;
-const workspace = new Workspace({newTask:()=>resetForm(),openRun:id=>openRun(id)});
+const workspace = new Workspace({newTask:()=>resetForm(),openRun:id=>openRun(id),handleAttention:id=>manageRunHistory(id,'dismiss')});
+const historyActions=element('div','run-history-actions');historyActions.hidden=true;
+const handleRun=element('button','secondary','标记已处理'),deleteRun=element('button','text-button danger','删除记录'),restoreRun=element('button','secondary','恢复记录');
+for(const button of [handleRun,deleteRun,restoreRun])button.type='button';
+const historyNote=element('span','muted');historyActions.append(handleRun,deleteRun,restoreRun,historyNote);$('runError').after(historyActions);
+handleRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,currentRun?.attentionHandledAt?'remind':'dismiss'));
+deleteRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,'delete'));
+restoreRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,'restore'));
+const deletedFilter=element('label','run-history-filter','已删除记录'),showDeletedRuns=element('input');showDeletedRuns.type='checkbox';deletedFilter.prepend(showDeletedRuns);$('runSearch').closest('.list-toolbar').after(deletedFilter);
+showDeletedRuns.addEventListener('change',()=>{selectedRunId=null;renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));});
+const visibleRuns=()=>state.runs.filter(run=>!!run.deletedAt===showDeletedRuns.checked);
+async function manageRunHistory(id,action){
+  const run=state.runs.find(row=>row.id===id);if(!run)return;
+  if(!state.historyManagement){toast('记录管理更新已准备；当前任务结束后重新启动后台即可使用。',true);return;}
+  if(action==='delete'&&!await confirmAction('删除“'+run.taskTitle+'”的工作台运行记录与顶部提示。项目文件、客户端对话和文件保护不受影响；可在“已删除记录”恢复。',{title:'删除运行记录',accept:'删除记录',danger:true}))return;
+  try{await api('runs/'+id+'/history','POST',{action});await refreshState();await refreshRun();toast(action==='delete'?'记录已删除，可在“已删除记录”恢复。':action==='restore'?'记录已恢复。':action==='dismiss'?'已处理提醒，原始执行结果保留。':'已恢复提醒。');}
+  catch(error){toast(error.message,true);}
+}
 const sessionsView = new SessionsView({ refresh: () => refreshState(), openRun: id => openRun(id), navigate: page => workspace.navigate(page), continueSession: session => continueSession(session) });
 async function continueSession(session) {
   if (!await resetForm()) return;
@@ -112,6 +129,10 @@ function renderTaskList() {
     button.addEventListener('click', () => loadTask(task));
     const row = element('div', 'queue-row');
     row.append(button);
+    if(task.queueStatus?.reason?.includes('文件占用冲突')){
+      const resolve=element('button','quiet','处理文件占用');resolve.type='button';
+      resolve.addEventListener('click',()=>{workspace.navigate('supervision');window.dispatchEvent(new Event('open-file-leases'));});row.append(resolve);
+    }
     if (hasPending(task)) {
       const moves = element('div', 'queue-moves');
       for (const [direction, label] of [[-1, '上移'], [1, '下移']]) {
@@ -349,7 +370,7 @@ function renderTaskActions() {
 }
 
 function renderRunOptions() {
-  const runs = [...state.runs].reverse();
+  const runs = [...visibleRuns()].reverse();
   if (!selectedRunId || !runs.some(run => run.id === selectedRunId)) selectedRunId = runs.find(run => run.taskId === selectedTaskId)?.id || runs[0]?.id || null;
   $('runSelect').replaceChildren();
   if (!runs.length) $('runSelect').append(new Option('还没有运行记录', ''));
@@ -360,12 +381,12 @@ function renderRunOptions() {
 
 function renderRunList(){
   const search=$('runSearch').value.trim().toLowerCase();
-  const runs=[...state.runs].reverse().filter(run=>!search || [run.taskTitle,providerNames[run.provider],names[run.status]].join(' ').toLowerCase().includes(search));
+  const runs=[...visibleRuns()].reverse().filter(run=>!search || [run.taskTitle,providerNames[run.provider],names[run.status]].join(' ').toLowerCase().includes(search));
   $('runList').replaceChildren();
   if(!runs.length)$('runList').append(element('p','run-list-empty',state.runs.length?'没有符合条件的运行记录。':'还没有运行记录。\n发送任务后，执行结果会保存在这里。'));
   for(const run of runs){const button=element('button','run-item'+(run.id===selectedRunId?' selected':''));button.type='button';button.append(element('strong','',run.taskTitle));const meta=element('span','run-meta');meta.append(element('span','',shortFormat.format(new Date(run.startedAt))),element('span','badge '+run.status,names[run.status] || run.status));button.append(meta);button.addEventListener('click',()=>openRun(run.id));$('runList').append(button);}
 }
-function openRun(id){selectedRunId=id;requestSignature='';workspace.showRun();renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));}
+function openRun(id){showDeletedRuns.checked=!!state.runs.find(run=>run.id===id)?.deletedAt;selectedRunId=id;requestSignature='';workspace.showRun();renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));}
 
 function renderRequests() {
   const requests = state.requests.filter(request => request.runId === selectedRunId);
@@ -426,6 +447,7 @@ async function refreshRun() {
   const runId = selectedRunId;
   $('runEmpty').hidden = !!runId;
   $('runDetails').hidden = !runId;
+  historyActions.hidden=true;
   if (!runId) { currentRun = null; $('copyOutput').disabled=true; return; }
   if(currentRun?.id!==runId){
     const summary=state.runs.find(run=>run.id===runId);currentRun=null;
@@ -446,6 +468,11 @@ async function refreshRun() {
   $('runTime').textContent = shortFormat.format(new Date(run.startedAt)) + (run.endedAt ? `\n用时 ${Math.max(1, Math.round((run.endedAt - run.startedAt) / 1000))} 秒` : '');
   $('runError').hidden = !run.error;
   $('runError').textContent = run.error;
+  historyActions.hidden=activeStates.has(run.status);
+  for(const button of [handleRun,deleteRun,restoreRun])button.disabled=!state.historyManagement;
+  handleRun.hidden=!!run.deletedAt;deleteRun.hidden=!!run.deletedAt;restoreRun.hidden=!run.deletedAt;
+  handleRun.textContent=run.attentionHandledAt?'恢复提醒':'标记已处理';
+  historyNote.textContent=!state.historyManagement?'记录管理更新已准备；当前任务结束后重新启动后台即可使用。':run.deletedAt?'已删除，可恢复。':run.attentionHandledAt?'提醒已处理；原始执行结果保留。':'处理提醒不会将待核实结果改为成功，也不会释放文件保护。';
   $('openThread').hidden = !run.threadId || (run.provider || 'codex') !== 'codex';
   $('openThread').href = run.threadId ? 'codex://threads/' + encodeURIComponent(run.threadId) : '#';
   $('interruptRun').hidden = !activeStates.has(run.status) || !run.turnId;

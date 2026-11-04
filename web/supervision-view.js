@@ -1,4 +1,4 @@
-import { $, element, api, toast } from './api.js';
+import { $, element, api, toast, confirmAction } from './api.js';
 
 const labels = { draft: '待安排', bound: '已绑定', scheduled: '已预约', correction_pending: '纠偏待发送', running: '执行中', collecting: '验收中', review_pending: '等待判断', correction_needed: '需要纠偏', accepted: '验收通过', exhausted: '纠偏次数已用完', blocked: '执行受阻', uncertain: '待核实', paused: '已暂停' };
 let selected = null, detailKey = '', loading = false, fieldSequence = 0;
@@ -179,7 +179,21 @@ async function refresh(force = false) {
       selected = m.id; detailKey = '';
     }, selected === m.id ? 'primary supervision-list-item' : 'secondary supervision-list-item'));
     leaseList.replaceChildren(element('p', '', '占用按任务声明的文件范围判断。共用项目目录或存在其他活动聊天不会锁住整个项目；独立研究使用独立产物目录。不确定的实际占用仍保留，此保护不能禁止手动修改。'));
-    for (const lease of snapshot.leases) leaseList.append(element('p', '', lease.provider + ' · ' + lease.cwd + ' · ' + lease.paths.join('、') + ' · ' + lease.access));
+    if(!snapshot.leases.length)leaseList.append(element('p','','没有保留的文件占用。'));
+    for (const lease of snapshot.leases) {
+      const mission=snapshot.missions.find(row=>row.id===lease.owner);
+      const box=element('section','supervision-check');
+      box.append(element('h3','',mission?.title || '运行记录 '+(lease.runId || lease.owner)),
+        element('p','',mission?labels[mission.state]+' · 文件保护仍保留':'文件保护仍保留'),
+        element('p','','项目：'+lease.cwd),element('p','','保护范围：'+lease.paths.join('、')),
+        element('p','','保留时间：'+new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium',timeStyle:'short'}).format(new Date(lease.acquiredAt))));
+      if(mission)box.append(button('查看来源任务',async()=>{selected=mission.id;detailKey='';}));
+      box.append(button('核实并释放占用',async()=>{
+        if(!await confirmAction('将核实“'+(mission?.title || lease.owner)+'”的原客户端会话已空闲，再释放 '+lease.paths.join('、')+' 的文件保护。旧督导将暂停，原结果与文件保留；等待此范围的新任务可能开始执行。',{title:'释放旧任务文件占用',accept:'核实并释放'}))return;
+        await api('supervision/leases/'+lease.id+'/release','POST',{confirmedIdle:true,reason:'用户在文件占用管理中核实并释放历史任务保护，保留原始执行和验收记录。'});
+        toast('原会话已核实为空闲，文件占用已释放。');
+      }));leaseList.append(box);
+    }
     if (selected) {
       const m = await api('supervision/missions/' + selected);
       if (force) detailKey = ''; await renderDetail(m);
@@ -187,6 +201,7 @@ async function refresh(force = false) {
   } finally { loading = false; }
 }
 createButton.addEventListener('click', createForm);
+window.addEventListener('open-file-leases',()=>{leasesBox.open=true;leasesBox.scrollIntoView({block:'start',behavior:'smooth'});});
 const events = new EventSource('/api/events');
 events.addEventListener('change', () => refresh().catch(e => toast(e.message, true)));
 events.addEventListener('ready', () => refresh().catch(e => toast(e.message, true)));

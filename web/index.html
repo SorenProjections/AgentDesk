@@ -46,7 +46,7 @@
       <div class="workspace-bar"><div class="breadcrumb"><svg class="icon"><use href="#i-monitor"/></svg><span>本地工作空间</span><span class="breadcrumb-separator">/</span><span id="breadcrumbCurrent">会话工作台</span></div><span id="currentTime" class="current-time"></span></div>
       <div class="page-content">
       <header class="page-header"><div><h1 id="pageTitle">会话工作台</h1><p id="pageDescription">集中查看会话进展与任务提醒。</p></div><button id="newTask" class="primary" type="button"><svg class="icon"><use href="#i-plus"/></svg>新建任务</button></header>
-      <button id="attentionBanner" class="attention-banner" type="button" hidden><svg class="icon"><use href="#i-alert"/></svg><span id="attentionText"></span><span>查看运行记录 <svg class="icon"><use href="#i-chevron"/></svg></span></button>
+      <div id="attentionNotice" class="attention-notice" hidden><button id="attentionBanner" class="attention-banner" type="button"><svg class="icon"><use href="#i-alert"/></svg><span id="attentionText"></span><span>查看并处理 <svg class="icon"><use href="#i-chevron"/></svg></span></button><button id="dismissAttention" class="secondary" type="button">不再提醒</button></div>
       <section id="sessionsPage" data-page="sessions" aria-labelledby="pageTitle">
         <div class="session-overview">
           <div class="session-presence"><span class="presence-mark"><svg class="icon"><use href="#i-activity"/></svg></span><div class="presence-copy"><h2 id="sessionAssurance">正在同步会话</h2><p id="sessionAssuranceDetail">后台持续观察任务，完成后会在这里提醒。</p></div><button id="syncSessions" class="secondary compact" type="button"><svg class="icon"><use href="#i-refresh"/></svg><span>同步会话</span></button></div>

@@ -113,6 +113,12 @@ svg.icon { display: inline-block; width: 20px; height: 20px; flex: 0 0 20px; fil
 .attention-banner { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 20px; background: #fff7e8; color: #875d1c; border: 1px solid #efdfbd; border-radius: 8px; text-align: left; font-size: 13px; }
 .attention-banner span:last-child { display: flex; align-items: center; gap: 6px; margin-left: auto; white-space: nowrap; font-size: 12px; }
 .attention-banner span:last-child .icon { width: 14px; height: 14px; flex-basis: 14px; }
+.attention-notice { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.attention-notice .attention-banner { flex: 1; min-width: 0; margin-bottom: 0; }
+.attention-notice > button:last-child { flex-shrink: 0; }
+.run-history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.run-history-filter { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.run-history-filter input { width: auto; }
 
 /* Source coverage is expandable; the primary surface remains the session list. */
 .session-overview { background: white; border: 1px solid var(--line); border-radius: 11px; margin-bottom: 24px; }

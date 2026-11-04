@@ -16,6 +16,7 @@ import { NativeWorkBuddyObserver } from './lib/native-workbuddy.mjs';
 import { SessionHub } from './lib/sessions.mjs';
 import { Supervision } from './lib/supervision.mjs';
 import { supervisionRoutes } from './lib/supervision-routes.mjs';
+import { runHistoryRoutes } from './lib/run-history.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.CODEX_SCHEDULER_PORT || 43127);
@@ -66,7 +67,7 @@ const sessions = new SessionHub(store, { sources: [
 ], notifier: (title, detail) => system.notify(title, detail, origin + '/#sessions') });
 const supervision = new Supervision(store, scheduler, { sessionRows: () => sessions.snapshot().sessions });
 supervision.on('change', () => scheduler.emit('change'));
-const snapshot = () => ({ ...scheduler.snapshot(), system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
+const snapshot = () => ({ ...scheduler.snapshot(), historyManagement:true, system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
 let shuttingDown = false;
 let pickingFolder = false;
 
@@ -169,6 +170,7 @@ const server = http.createServer(async (request, response) => {
     if (!['GET', 'HEAD'].includes(request.method) && (request.headers.origin !== origin || request.headers['x-scheduler-request'] !== '1')) return send(response, 403, { error: '请在本机面板中执行此操作。' });
 
     if (request.method === 'GET' && url.pathname === '/api/state') return send(response, 200, snapshot());
+    if (await runHistoryRoutes(request,response,url,{store,scheduler,body,send})) return;
     if (url.pathname.startsWith('/api/supervision')) {
       if (await supervisionRoutes(request, response, url, { supervision, body, send })) return;
     }
