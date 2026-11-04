@@ -403,6 +403,7 @@ body:has(dialog[open]) { overflow: hidden; }
 .provider-monogram { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 12px; background: #eef3fc; color: #5277bb; font-size: 18px; font-weight: 650; }
 .provider-monogram.antigravityDesktop, .provider-monogram.antigravity { background: #f3effa; color: #8062b0; }
 .provider-monogram.workbuddyDesktop, .provider-monogram.workbuddy { background: #eef6f3; color: #39826c; }
+.provider-monogram.doubaoDesktop, .provider-mark.doubaoDesktop { background: #edf4ff; color: #3975c6; }
 .provider-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
 .provider-kind { font-size: 11px; color: var(--muted); margin-bottom: 17px; }
 .provider-description { font-size: 12px; line-height: 1.9; color: var(--muted); flex: 1; min-height: 66px; overflow-wrap: anywhere; }

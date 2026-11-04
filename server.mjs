@@ -9,6 +9,7 @@ import { Store } from './lib/store.mjs';
 import { Scheduler, validateFolder } from './lib/scheduler.mjs';
 import { CommandProvider } from './lib/providers.mjs';
 import { AntigravityDesktop, WorkBuddyDesktop } from './lib/desktop.mjs';
+import { DoubaoDesktop } from './lib/doubao-desktop.mjs';
 import { SystemIntegration } from './lib/system.mjs';
 import { NativeCodexObserver } from './lib/native-codex.mjs';
 import { NativeWorkBuddyObserver } from './lib/native-workbuddy.mjs';
@@ -38,7 +39,7 @@ const sessionSecret = randomBytes(32).toString('hex');
 const clients = new Set();
 const client = new CodexClient({ cwd: root });
 const providers = new Map(['antigravity', 'workbuddy'].map(id => [id, new CommandProvider(id, { cwd: root, binary: store.data.settings.providers?.[id]?.binary || '', verification: store.data.settings.providers?.[id]?.verification || null })]));
-for (const provider of [new AntigravityDesktop(), new WorkBuddyDesktop()]) {
+for (const provider of [new AntigravityDesktop(), new WorkBuddyDesktop(), new DoubaoDesktop()]) {
   provider.verification = store.data.settings.providers?.[provider.id]?.verification || null;
   providers.set(provider.id, provider);
 }
@@ -142,6 +143,8 @@ const assets = {
   '/supervision.css': ['supervision.css', 'text/css; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
   '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+  '/agentdesk.png': ['agentdesk.png', 'image/png'],
+  '/agentdesk.ico': ['agentdesk.ico', 'image/x-icon'],
 };
 
 const server = http.createServer(async (request, response) => {
@@ -190,11 +193,12 @@ const server = http.createServer(async (request, response) => {
       scheduler.reorder((await body(request)).ids);
       return send(response, 200, snapshot());
     }
-    if (request.method === 'POST' && url.pathname === '/api/desktop/workbuddy/launch') {
+    const desktopLaunch = url.pathname.match(/^\/api\/desktop\/(workbuddy|doubao)\/launch$/);
+    if (request.method === 'POST' && desktopLaunch) {
       if (scheduler.active) throw new Error('请等待面板当前任务结束后启动桌面连接。');
-      return send(response, 200, await providers.get('workbuddyDesktop').launch());
+      return send(response, 200, await providers.get(desktopLaunch[1] + 'Desktop').launch());
     }
-    const providerMatch = url.pathname.match(/^\/api\/providers\/(antigravity|workbuddy|antigravityDesktop|workbuddyDesktop)$/);
+    const providerMatch = url.pathname.match(/^\/api\/providers\/(antigravity|workbuddy|antigravityDesktop|workbuddyDesktop|doubaoDesktop)$/);
     if (request.method === 'POST' && providerMatch) {
       if (scheduler.active) throw new Error('请等待当前运行结束再调整接入。');
       const input = await body(request);

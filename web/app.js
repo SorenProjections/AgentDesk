@@ -4,7 +4,7 @@ import { renderProviders } from './providers-view.js';
 import { SessionsView } from './sessions-view.js';
 const names = { idle: '空闲', working: '运行中', planning: '运行中', pending: '待执行', dispatching: '正在发送', running: '运行中', waiting: '等你处理', completed: '已完成', failed: '失败', interrupted: '已停止', uncertain: '待核实', missed: '已跳过', paused: '已暂停' };
 Object.assign(names, { ready: '可发送', blocked: '接续受阻', editing: '编辑中', finished: '已发送' });
-const providerNames = { codex: 'Codex', antigravity: 'Antigravity CLI', workbuddy: 'WorkBuddy CLI', antigravityDesktop: 'Antigravity 桌面端', workbuddyDesktop: 'WorkBuddy 桌面端' };
+const providerNames = { codex: 'Codex', antigravity: 'Antigravity CLI', workbuddy: 'WorkBuddy CLI', antigravityDesktop: 'Antigravity 桌面端', workbuddyDesktop: 'WorkBuddy 桌面端', doubaoDesktop: '豆包桌面端' };
 const editToken = crypto.randomUUID();
 let editingId = null;
 let editingRevision = null;
@@ -161,10 +161,17 @@ function updateSummary() {
 }
 
 function toggleThreadMode() {
+  const newOnly = $('provider').value === 'doubaoDesktop';
+  for (const value of ['existing','previous']) {
+    const radio = document.querySelector('input[name="threadMode"][value="'+value+'"]');
+    radio.disabled = newOnly || (value === 'previous' && $('triggerType').value !== 'afterTask');
+    if (newOnly && radio.checked) document.querySelector('input[name="threadMode"][value="new"]').checked = true;
+  }
+  $('newThreadHelp').textContent = newOnly ? '每次发送都会新建豆包对话。项目路径仅用于面板归档，不代表豆包可以访问该目录。停止运行仅停止监控，生成请在豆包中停止。' : '执行时新建对话；多个发送时间继续使用同一个对话。';
   const existing = document.querySelector('input[name="threadMode"]:checked').value === 'existing';
   $('existingThreadField').hidden = !existing;
   $('newThreadHelp').hidden = document.querySelector('input[name="threadMode"]:checked').value !== 'new';
-  const desktop = ['antigravityDesktop', 'workbuddyDesktop'].includes($('provider').value);
+  const desktop = ['antigravityDesktop', 'workbuddyDesktop', 'doubaoDesktop'].includes($('provider').value);
   $('threadSelect').required = existing && ($('provider').value === 'codex' || desktop);
   $('manualThreadField').hidden = $('provider').value === 'codex' || desktop;
   if (existing && $('cwd').value.trim()) void loadThreads().catch(error => toast(error.message, true));
@@ -433,7 +440,7 @@ async function refreshState() {
 $('taskForm').addEventListener('submit', async event => {
   event.preventDefault();
   const times = $('triggerType').value === 'time' ? [...$('timeList').querySelectorAll('input')].map(input => parseTime(input.value)) : [];
-  const threadId = $('provider').value === 'codex' || ['antigravityDesktop','workbuddyDesktop'].includes($('provider').value) ? $('threadSelect').value : $('manualThread').value.trim() || $('threadSelect').value;
+  const threadId = $('provider').value === 'codex' || ['antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes($('provider').value) ? $('threadSelect').value : $('manualThread').value.trim() || $('threadSelect').value;
   const input = {
     provider: $('provider').value, revision: editingRevision, editToken, timeoutMinutes: Number($('timeoutMinutes').value),
     trigger: { type: $('triggerType').value, taskId: $('afterTask').value, runId: $('afterRun').value || null, onFailure: $('onFailure').value },
@@ -584,7 +591,7 @@ function toggleTrigger() {
   $('timeList').querySelectorAll('input').forEach(input => { input.required = kind === 'time'; });
   $('triggerHelp').textContent = kind === 'time' ? '每个时间发送一次；发送前可编辑。' : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
   const previous = document.querySelector('input[name="threadMode"][value="previous"]');
-  previous.disabled = kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
+  previous.disabled = $('provider').value === 'doubaoDesktop' || kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
   if (kind !== 'afterTask' && previous.checked) { document.querySelector('input[name="threadMode"][value="new"]').checked = true; toggleThreadMode(); }
   updateSummary();
 }
@@ -597,7 +604,7 @@ function renderProviderHelp() {
   $('timeoutMinutes').closest('.timeout-field').hidden = id === 'codex';
   $('timeoutMinutes').closest('.timeout-field').querySelector('.field-help').textContent = desktop ? '超过监控时间会暂停接续，保留发送记录；客户端中的任务继续运行。' : '到达上限会停止 CLI 并暂停队列，保留结果供核实。';
   for (const key of ['sandbox', 'approval', 'networkAccess']) $(key).parentElement.hidden = id !== 'codex';
-  $('defaultModel').textContent = id === 'codex' ? `Codex 当前配置：${state.connection.defaults.model || '默认模型'}。` : desktop ? (id === 'antigravityDesktop' ? '使用桌面服务默认模型，也可填写桌面模型列表中的完整名称。其他权限由客户端处理。' : '复用桌面账号和会话设置；需要确认时在 WorkBuddy 中处理。') : '文件、命令和网络权限遵循本机 CLI 设置；CLI 需要交互时可能失败，请先完成登录和所需权限配置。';
+  $('defaultModel').textContent = id === 'codex' ? `Codex 当前配置：${state.connection.defaults.model || '默认模型'}。` : desktop ? (id === 'antigravityDesktop' ? '使用桌面服务默认模型，也可填写桌面模型列表中的完整名称。其他权限由客户端处理。' : '复用桌面账号和会话设置；需要确认时在原客户端处理。') : '文件、命令和网络权限遵循本机 CLI 设置；CLI 需要交互时可能失败，请先完成登录和所需权限配置。';
   $('model').parentElement.hidden = desktop && !provider.capabilities.model;
   $('effort').parentElement.hidden = desktop;
   if (desktop) { $('effort').value = ''; if (!provider.capabilities.model) $('model').value = ''; }

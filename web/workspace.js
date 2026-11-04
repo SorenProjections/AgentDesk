@@ -15,7 +15,7 @@ export class Workspace {
   showRun(open=true){$('recordsWorkspace').classList.toggle('has-detail',open);if(open)this.navigate('runs');else window.scrollTo({top:0,left:0,behavior:'instant'});}
   update(state,hasPending){
     const pending=state.tasks.filter(hasPending).length;const live=state.runs.find(run=>['dispatching','running','waiting'].includes(run.status));
-    const connected=(state.providers || []).filter(p=>['codex','antigravityDesktop','workbuddyDesktop'].includes(p.id)&&p.available).length;$('navPending').textContent=pending;
+    const connected=(state.providers || []).filter(p=>['codex','antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes(p.id)&&p.available).length;$('navPending').textContent=pending;
     const attention=state.runs.filter(run=>run.status==='waiting'||run.status==='uncertain');const actionable=attention.find(run=>run.id===state.activeRunId)||attention.at(-1);
     $('navAttention').hidden=!attention.length;$('navAttention').textContent=attention.length;this.attentionRun=actionable?.id;$('attentionBanner').hidden=!actionable;$('attentionText').textContent=actionable?(actionable.status==='waiting'?'运行正在等待你的处理：':'执行结果需要核实：')+actionable.taskTitle:'';
     const paused=state.settings?.queuePaused;$('queueStateLabel').textContent=state.maintenance?'正在验证连接':paused?'队列已暂停':live?'正在执行任务':'队列自动运行';$('queueDot').classList.toggle('paused',!!paused);$('queueMetrics').textContent=`${pending} 条待发送 · ${connected}/3 个本机 Agent 已连接`;

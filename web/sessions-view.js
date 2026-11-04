@@ -1,6 +1,6 @@
 import { $, element, icon, api, toast, containDialogFocus } from './api.js';
 
-const names = { codex: 'Codex', workbuddyDesktop: 'WorkBuddy', antigravityDesktop: 'Antigravity', workbuddy: 'WorkBuddy CLI', antigravity: 'Antigravity CLI' };
+const names = { codex: 'Codex', doubaoDesktop: '豆包', workbuddyDesktop: 'WorkBuddy', antigravityDesktop: 'Antigravity', workbuddy: 'WorkBuddy CLI', antigravity: 'Antigravity CLI' };
 const labels = { running: '运行中', dispatching: '正在发送', waiting: '等你处理', completed: '已完成', failed: '失败', interrupted: '已停止', uncertain: '待核实', idle: '空闲' };
 const active = new Set(['running', 'dispatching', 'waiting']);
 const date = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
