@@ -1,7 +1,7 @@
 import { $, element, api, toast, confirmAction } from './api.js';
 
 const labels = { draft: '待安排', bound: '已绑定', scheduled: '已预约', correction_pending: '纠偏待发送', running: '执行中', collecting: '验收中', review_pending: '等待判断', correction_needed: '需要纠偏', accepted: '验收通过', exhausted: '纠偏次数已用完', blocked: '执行受阻', uncertain: '待核实', paused: '已暂停' };
-let selected = null, detailKey = '', loading = false, fieldSequence = 0;
+let selected = null, detailKey = '', listKey = '', leasesKey = '', loading = false, fieldSequence = 0;
 const section = $('supervisionPage');
 const list = element('div', 'supervision-list'), detail = element('div', 'supervision-detail');
 const layout = element('div', 'supervision-layout'); layout.append(list, detail);
@@ -37,7 +37,7 @@ function button(label, action, className = 'secondary', refreshAfter = true) {
   const node = element('button', className, label); node.type = 'button';
   node.addEventListener('click', async () => {
     node.disabled = true;
-    try { await action(); if (refreshAfter) await refresh(true); } catch (error) { toast(error.message, true); }
+    try { await action(); if (refreshAfter) { await refresh(true); if(className.includes('supervision-list-item'))detail.scrollIntoView({block:'start',behavior:'instant'}); } } catch (error) { toast(error.message, true); }
     finally { node.disabled = false; }
   }); return node;
 }
@@ -116,16 +116,17 @@ async function renderDetail(m) {
   if (key === detailKey) return;
   detailKey = key; detail.replaceChildren();
   detail.append(element('h2', '', m.title), element('p', '', labels[m.state] + ' · 纠偏 ' + m.corrections + '/' + m.maxCorrections),
-    element('p', '', '文件夹：' + m.cwd), element('p', '', '会话：' + (m.binding?.threadId || '执行时新建')),
-    element('h3', '', '目标'), element('p', '', m.objective), element('h3', '', '约束'));
+    element('p', '', '文件夹：' + m.cwd), element('p', '', '会话：' + (m.binding?.threadId || '执行时新建')));
+  const management=element('div','supervision-actions');detail.append(management);
+  const remove=button(m.deletedAt?'恢复任务':'删除任务',()=>manageHistory([m.id],m.deletedAt?'restore':'delete'),'text-button danger');remove.disabled=!historyManagement||!manageable(m);management.append(remove);
+  if(m.lease)detail.append(element('p','page-note','此任务保留文件保护。删除不会释放占用；可在下方“文件占用与保护范围”核实并释放。'));
+  if(m.deletedAt){detail.append(element('p','','此任务已删除。恢复后可查看与处理原任务；不会自动发送指令。'));return;}
+  detail.append(element('h3', '', '目标'), element('p', '', m.objective), element('h3', '', '约束'));
   const constraints = element('ul');
   for (const c of m.constraints) constraints.append(element('li', '', c));
   detail.append(constraints, element('p', '', '工作范围：' + m.writePaths.join('、')));
   if (m.error) detail.append(element('p', 'supervision-error', m.error));
   const actions = element('div', 'supervision-actions'); detail.append(actions);
-  const remove=button(m.deletedAt?'恢复任务':'删除任务',()=>manageHistory([m.id],m.deletedAt?'restore':'delete'),'text-button danger');remove.disabled=!historyManagement||!manageable(m);actions.append(remove);
-  if(m.lease)detail.append(element('p','page-note','此任务保留文件保护。删除不会释放占用；可在下方“文件占用与保护范围”核实并释放。'));
-  if(m.deletedAt){detail.append(element('p','','此任务已删除。恢复后可查看与处理原任务；不会自动发送指令。'));return;}
   const stage = element('pre'); stage.hidden = true; detail.append(stage);
   actions.append(button('查看阶段产物与进度', async () => {
     stage.textContent = JSON.stringify(await api('supervision/missions/' + m.id + '/observe'), null, 2); stage.hidden = false;
@@ -199,6 +200,9 @@ async function refresh(force = false) {
   try {
     const snapshot = await api('supervision');
     missionRows=snapshot.missions;historyManagement=!!snapshot.historyManagement;updateSelection();
+    const nextListKey=JSON.stringify([selected,showDeleted.checked,historyManagement,[...picked],visibleMissions().map(m=>[m.id,m.title,m.state])]);
+    if(nextListKey!==listKey){
+    listKey=nextListKey;
     list.replaceChildren(element('h2', '', '督导任务'));
     if (!visibleMissions().length) list.append(element('p', '', showDeleted.checked?'没有已删除的督导任务。':'没有督导任务。'));
     for (const m of visibleMissions()) {
@@ -208,6 +212,10 @@ async function refresh(force = false) {
       selected = m.id; detailKey = '';
     }, selected === m.id ? 'primary supervision-list-item' : 'secondary supervision-list-item'));list.append(row);
     }
+    }
+    const nextLeasesKey=JSON.stringify([snapshot.leases,snapshot.missions.map(m=>[m.id,m.title,m.state,m.deletedAt])]);
+    if(nextLeasesKey!==leasesKey){
+    leasesKey=nextLeasesKey;
     leaseList.replaceChildren(element('p', '', '占用按任务声明的文件范围判断。共用项目目录或存在其他活动聊天不会锁住整个项目；独立研究使用独立产物目录。不确定的实际占用仍保留，此保护不能禁止手动修改。'));
     if(!snapshot.leases.length)leaseList.append(element('p','','没有保留的文件占用。'));
     for (const lease of snapshot.leases) {
@@ -217,12 +225,13 @@ async function refresh(force = false) {
         element('p','',mission?labels[mission.state]+' · 文件保护仍保留':'文件保护仍保留'),
         element('p','','项目：'+lease.cwd),element('p','','保护范围：'+lease.paths.join('、')),
         element('p','','保留时间：'+new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium',timeStyle:'short'}).format(new Date(lease.acquiredAt))));
-      if(mission)box.append(button('查看来源任务',async()=>{selected=mission.id;detailKey='';}));
+      if(mission)box.append(button('查看来源任务',async()=>{showDeleted.checked=!!mission.deletedAt;selected=mission.id;detailKey='';}));
       box.append(button('核实并释放占用',async()=>{
         if(!await confirmAction('将核实“'+(mission?.title || lease.owner)+'”的原客户端会话已空闲，再释放 '+lease.paths.join('、')+' 的文件保护。旧督导将暂停，原结果与文件保留；等待此范围的新任务可能开始执行。',{title:'释放旧任务文件占用',accept:'核实并释放'}))return;
         await api('supervision/leases/'+lease.id+'/release','POST',{confirmedIdle:true,reason:'用户在文件占用管理中核实并释放历史任务保护，保留原始执行和验收记录。'});
         toast('原会话已核实为空闲，文件占用已释放。');
       }));leaseList.append(box);
+    }
     }
     if (selected) {
       const m = await api('supervision/missions/' + selected);
