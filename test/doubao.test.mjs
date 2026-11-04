@@ -15,10 +15,11 @@ function fixture(options = {}) {
     if (stage !== 'sent') return { ready: true, draft: '', busy: false, messages: [] };
     polls++;
     const messages = [{ role: 'user', text: 'hello' }, { role: 'assistant', text: polls < 3 ? 'partial' : 'answer', streaming: polls < 3, finished: polls >= 3 }];
+    if (options.placeholder && polls === 1) messages[0].text = '';
     if (options.interference) messages.push({ role: 'user', text: 'human message' });
     if (options.noFinish) messages[1].finished = false;
     if (options.disconnected) throw new Error('connection lost');
-    return { ready: true, draft: '', busy: polls < 3, canSend: false, href: options.switchChat && polls > 1 ? 'other' : 'chat', messages };
+    return { ready: true, draft: '', busy: polls < 3, canSend: false, href: options.nativeRedirect ? 'chrome://doubao-chat/chat/' + (polls < 3 ? 'local_123' : '456') : options.switchChat && polls > 1 ? 'other' : 'chat', messages };
   };
   const start = (task = {}, run = {}) => provider.start({ threadMode: 'new', timeoutMinutes: 0.25, ...task }, { prompt: 'hello', ...run }, { output: text => { output = text; } });
   return { provider, start, get sends() { return sends; }, get polls() { return polls; }, get output() { return output; } };
@@ -28,6 +29,12 @@ test('Doubao waits for the new turn, finished controls and stable text even when
   const f = fixture();
   assert.equal((await f.start().completion).status, 'completed');
   assert.equal(f.output, 'answer'); assert.equal(f.sends, 1); assert.ok(f.polls >= 6);
+});
+
+test('Doubao tolerates empty hydration placeholders and saving its temporary native chat URL', async () => {
+  const f = fixture({placeholder:true,nativeRedirect:true});
+  assert.equal((await f.start().completion).status, 'completed');
+  assert.equal(f.output, 'answer'); assert.equal(f.sends, 1);
 });
 
 test('Doubao never treats partial text, transport ambiguity or changed conversations as success', async () => {
@@ -59,8 +66,11 @@ test('Doubao probe requires an owned loopback port and a compatible chat page', 
 });
 
 test('Doubao launch refuses to close a running client', async () => {
-  const p = new DoubaoDesktop({ discovery: async () => ({ processes: [{ pid: 1 }], ports: [] }) });
-  await assert.rejects(p.launch(), /仍在运行/);
+  const p = new DoubaoDesktop({ discovery: async () => ({ processes: [{ pid: 1, name: 'Doubao.exe' }], ports: [] }) });
+  const result = await p.launch();
+  assert.equal(result.requiresRestart, true);
+  assert.equal(result.launched, false);
+  assert.equal(result.connected, false);
 });
 
 test('scheduler serializes Doubao across independent folders while other providers remain parallel', () => {
@@ -76,7 +86,7 @@ test('DOM adapter preserves drafts and injects prompt as data without executing 
   class TextArea { value = ''; dispatchEvent() {} }
   let value = '';
   Object.defineProperty(TextArea.prototype, 'value', { get() { return value; }, set(v) { value = v; } });
-  const input = new TextArea(); delete input.value;
+  const input = new TextArea(); delete input.value; input.matches = () => true;
   const send = { disabled: false, getAttribute() { return null; }, click() { clicked++; } };
   const context = vm.createContext({ HTMLTextAreaElement: TextArea, Event: class {}, location: { href: 'chat' }, document: {
     querySelector: selector => selector === '[data-testid="chat_input_input"]' ? input : selector === '[data-testid="chat_input_send_button"]' ? send : null,

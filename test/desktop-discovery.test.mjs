@@ -28,7 +28,8 @@ test('desktop providers share in-flight native discovery and never invoke CIM po
   const script = Buffer.from(calls[0].args.at(-1), 'base64').toString('utf16le');
   assert.match(script, /Get-Process/); assert.doesNotMatch(script, /Get-CimInstance|Get-NetTCPConnection|CommandLine/);
   assert.deepEqual(a.ports, [{ pid: 12, port: 9337 }]);
-  await discovery(); assert.equal(calls.length, 4);
+  await discovery(); assert.equal(calls.length, 2);
+  await discovery({fresh:true}); assert.equal(calls.length, 4);
 });
 
 test('discovery failures identify process and port errors and allow the next retry', async () => {

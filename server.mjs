@@ -196,7 +196,11 @@ const server = http.createServer(async (request, response) => {
     const desktopLaunch = url.pathname.match(/^\/api\/desktop\/(workbuddy|doubao)\/launch$/);
     if (request.method === 'POST' && desktopLaunch) {
       if (scheduler.active) throw new Error('请等待面板当前任务结束后启动桌面连接。');
-      return send(response, 200, await providers.get(desktopLaunch[1] + 'Desktop').launch());
+      const provider = providers.get(desktopLaunch[1] + 'Desktop');
+      if (provider.checking || scheduler.maintenance) throw new Error('Agent 正在连接，请等待完成。');
+      provider.checking = true; scheduler.maintenance = true; scheduler.emit('change');
+      try { return send(response, 200, await provider.launch(() => scheduler.emit('change'))); }
+      finally { provider.checking = false; scheduler.maintenance = false; scheduler.emit('change'); }
     }
     const providerMatch = url.pathname.match(/^\/api\/providers\/(antigravity|workbuddy|antigravityDesktop|workbuddyDesktop|doubaoDesktop)$/);
     if (request.method === 'POST' && providerMatch) {
@@ -209,7 +213,13 @@ const server = http.createServer(async (request, response) => {
       if (input.verify) { scheduler.maintenance = true; scheduler.emit('change'); }
       try {
         result = await provider.probe(typeof input.binary === 'string' ? input.binary.trim() : undefined);
-        if (input.verify && result.available) result = await provider.verify();
+        if (input.verify) {
+          if (result.available) result = await provider.verify();
+          else {
+            provider.verification = { at: Date.now(), status: 'failed', error: result.detail };
+            result = provider.snapshot();
+          }
+        }
       } finally {
         provider.checking = false;
         if (input.verify) { scheduler.maintenance = false; scheduler.emit('change'); }

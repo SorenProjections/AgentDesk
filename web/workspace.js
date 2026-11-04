@@ -18,7 +18,8 @@ export class Workspace {
     const connected=(state.providers || []).filter(p=>['codex','antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes(p.id)&&p.available).length;$('navPending').textContent=pending;
     const attention=state.runs.filter(run=>run.status==='waiting'||run.status==='uncertain');const actionable=attention.find(run=>run.id===state.activeRunId)||attention.at(-1);
     $('navAttention').hidden=!attention.length;$('navAttention').textContent=attention.length;this.attentionRun=actionable?.id;$('attentionBanner').hidden=!actionable;$('attentionText').textContent=actionable?(actionable.status==='waiting'?'运行正在等待你的处理：':'执行结果需要核实：')+actionable.taskTitle:'';
-    const paused=state.settings?.queuePaused;$('queueStateLabel').textContent=state.maintenance?'正在验证连接':paused?'队列已暂停':live?'正在执行任务':'队列自动运行';$('queueDot').classList.toggle('paused',!!paused);$('queueMetrics').textContent=`${pending} 条待发送 · ${connected}/3 个本机 Agent 已连接`;
+    const total=(state.providers || []).filter(p=>['codex','antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes(p.id)).length;
+    const paused=state.settings?.queuePaused;$('queueStateLabel').textContent=state.maintenance?'正在验证连接':paused?'队列已暂停':live?'正在执行任务':'队列自动运行';$('queueDot').classList.toggle('paused',!!paused);$('queueMetrics').textContent=`${pending} 条待发送 · ${connected}/${total} 个本机 Agent 已连接`;
   }
   emptyQueue({filtered=false}={}){
     const box=element('div','queue-empty');if(filtered){box.append(icon('queue'),element('h2','','没有符合条件的任务'),element('p','','试试其他筛选条件，或清空搜索内容。'));return box;}
