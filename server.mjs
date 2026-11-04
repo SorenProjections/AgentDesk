@@ -67,7 +67,7 @@ const sessions = new SessionHub(store, { sources: [
 ], notifier: (title, detail) => system.notify(title, detail, origin + '/#sessions') });
 const supervision = new Supervision(store, scheduler, { sessionRows: () => sessions.snapshot().sessions });
 supervision.on('change', () => scheduler.emit('change'));
-const snapshot = () => ({ ...scheduler.snapshot(), historyManagement:true, system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
+const snapshot = () => ({ ...scheduler.snapshot(), historyManagement:2, system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
 let shuttingDown = false;
 let pickingFolder = false;
 

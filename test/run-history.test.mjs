@@ -4,7 +4,7 @@ import {EventEmitter} from 'node:events';
 import {mkdirSync,mkdtempSync} from 'node:fs';
 import path from 'node:path';
 import {Store} from '../lib/store.mjs';
-import {updateRunHistory,runHistoryRoutes} from '../lib/run-history.mjs';
+import {updateRunHistory,updateRunHistories,runHistoryRoutes} from '../lib/run-history.mjs';
 
 function fixture(){
   const root=path.resolve('work/history-tests');mkdirSync(root,{recursive:true});
@@ -48,4 +48,16 @@ test('history route accepts only the explicit mutation endpoint',async()=>{
   assert.equal(await runHistoryRoutes({method:'GET'},{},url,args),false);
   assert.equal(await runHistoryRoutes({method:'POST'},{},url,args),true);
   assert.equal(result.status,200);assert.ok(result.data.deletedAt);
+});
+
+test('bulk history mutation validates every record before changing any, and can restore the whole selection',()=>{
+  const f=fixture();f.store.data.runs.push({id:'live',status:'running'},{id:'old-2',status:'completed',output:'result'});
+  assert.throws(()=>updateRunHistories(f.store,f.scheduler,['run-1','live'],'delete'),/运行中/);
+  assert.equal(f.store.data.runs[0].deletedAt,undefined);
+  assert.throws(()=>updateRunHistories(f.store,f.scheduler,['run-1','missing'],'delete'),/不存在/);
+  assert.equal(f.store.data.runs[0].deletedAt,undefined);
+  const rows=updateRunHistories(f.store,f.scheduler,['run-1','old-2','run-1'],'delete',()=>456);
+  assert.equal(rows.length,2);assert.ok(rows.every(row=>row.deletedAt===456));
+  updateRunHistories(f.store,f.scheduler,['run-1','old-2'],'restore');
+  assert.equal(f.store.data.runs[2].output,'result');assert.equal(f.store.data.runs[2].deletedAt,undefined);
 });

@@ -10,6 +10,28 @@ const createButton = element('button', 'primary', '新建督导任务'); createB
 const leasesBox = element('details', 'supervision-leases'); leasesBox.append(element('summary', '', '文件占用与保护范围'));
 const leaseList = element('div'); leasesBox.append(leaseList);
 section.append(intro, createButton, layout, leasesBox);
+const deletedLabel=element('label','run-history-filter','已删除任务'),showDeleted=element('input');showDeleted.type='checkbox';deletedLabel.prepend(showDeleted);
+const picked=new Set(),batch=element('div','history-batch'),pickAll=element('button','text-button','全选可删除任务'),clearPicked=element('button','text-button','取消选择'),managePicked=element('button','text-button danger','删除所选');
+for(const node of [pickAll,clearPicked,managePicked])node.type='button';
+batch.append(pickAll,clearPicked,managePicked);createButton.after(deletedLabel,batch);
+let missionRows=[],historyManagement=false;
+const visibleMissions=()=>missionRows.filter(m=>!!m.deletedAt===showDeleted.checked);
+const manageable=m=>!['running','dispatching','collecting'].includes(m.state);
+function updateSelection(){
+  const allowed=new Set(visibleMissions().filter(manageable).map(m=>m.id));
+  for(const id of picked)if(!allowed.has(id))picked.delete(id);
+  pickAll.disabled=!historyManagement||!allowed.size;clearPicked.hidden=!picked.size;
+  pickAll.textContent=showDeleted.checked?'全选已删除任务':'全选可删除任务';
+  managePicked.disabled=!historyManagement||!picked.size;managePicked.textContent=(showDeleted.checked?'恢复所选':'删除所选')+(picked.size?'（'+picked.size+'）':'');
+}
+async function manageHistory(ids,action){
+  if(!await confirmAction((action==='delete'?'删除':'恢复')+'所选 '+ids.length+' 个督导任务？'+(action==='delete'?'未发送的指令将暂停。项目文件、客户端对话、验收证据和文件保护保留；可在“已删除任务”恢复。':'恢复后不会自动发送暂停的指令。'),{title:action==='delete'?'删除督导任务':'恢复督导任务',accept:action==='delete'?'删除任务':'恢复任务',danger:action==='delete'}))return;
+  await api('supervision/history','POST',{ids,action});picked.clear();selected=null;detailKey='';detail.replaceChildren();await refresh(true);toast(action==='delete'?'督导任务已删除，可在“已删除任务”恢复。':'督导任务已恢复；暂停的指令需要手动恢复。');
+}
+showDeleted.addEventListener('change',()=>{picked.clear();selected=null;detailKey='';detail.replaceChildren();void refresh(true).catch(error=>toast(error.message,true));});
+pickAll.addEventListener('click',()=>{for(const m of visibleMissions().filter(manageable))picked.add(m.id);void refresh(true).catch(error=>toast(error.message,true));});
+clearPicked.addEventListener('click',()=>{picked.clear();void refresh(true).catch(error=>toast(error.message,true));});
+managePicked.addEventListener('click',async()=>{managePicked.disabled=true;try{await manageHistory([...picked],showDeleted.checked?'restore':'delete');}catch(error){toast(error.message,true);}finally{updateSelection();}});
 
 function button(label, action, className = 'secondary', refreshAfter = true) {
   const node = element('button', className, label); node.type = 'button';
@@ -90,7 +112,7 @@ function createForm() {
 }
 
 async function renderDetail(m) {
-  const key = [m.id, m.state, m.instructions.length, m.reviews.at(-1)?.id, m.error].join(':');
+  const key = [m.id, m.state, m.instructions.length, m.reviews.at(-1)?.id, m.error, m.deletedAt, historyManagement].join(':');
   if (key === detailKey) return;
   detailKey = key; detail.replaceChildren();
   detail.append(element('h2', '', m.title), element('p', '', labels[m.state] + ' · 纠偏 ' + m.corrections + '/' + m.maxCorrections),
@@ -101,6 +123,9 @@ async function renderDetail(m) {
   detail.append(constraints, element('p', '', '工作范围：' + m.writePaths.join('、')));
   if (m.error) detail.append(element('p', 'supervision-error', m.error));
   const actions = element('div', 'supervision-actions'); detail.append(actions);
+  const remove=button(m.deletedAt?'恢复任务':'删除任务',()=>manageHistory([m.id],m.deletedAt?'restore':'delete'),'text-button danger');remove.disabled=!historyManagement||!manageable(m);actions.append(remove);
+  if(m.lease)detail.append(element('p','page-note','此任务保留文件保护。删除不会释放占用；可在下方“文件占用与保护范围”核实并释放。'));
+  if(m.deletedAt){detail.append(element('p','','此任务已删除。恢复后可查看与处理原任务；不会自动发送指令。'));return;}
   const stage = element('pre'); stage.hidden = true; detail.append(stage);
   actions.append(button('查看阶段产物与进度', async () => {
     stage.textContent = JSON.stringify(await api('supervision/missions/' + m.id + '/observe'), null, 2); stage.hidden = false;
@@ -173,11 +198,16 @@ async function refresh(force = false) {
   loading = true;
   try {
     const snapshot = await api('supervision');
+    missionRows=snapshot.missions;historyManagement=!!snapshot.historyManagement;updateSelection();
     list.replaceChildren(element('h2', '', '督导任务'));
-    if (!snapshot.missions.length) list.append(element('p', '', '还没有督导任务。先保存目标、约束和验收标准。'));
-    for (const m of snapshot.missions) list.append(button(m.title + ' · ' + labels[m.state], async () => {
+    if (!visibleMissions().length) list.append(element('p', '', showDeleted.checked?'没有已删除的督导任务。':'没有督导任务。'));
+    for (const m of visibleMissions()) {
+      const row=element('div','history-select-row'),check=element('input');check.type='checkbox';check.setAttribute('aria-label','选择督导任务：'+m.title);check.checked=picked.has(m.id);check.disabled=!historyManagement||!manageable(m);
+      check.addEventListener('change',()=>{check.checked?picked.add(m.id):picked.delete(m.id);updateSelection();});
+      row.append(check,button(m.title + ' · ' + labels[m.state], async () => {
       selected = m.id; detailKey = '';
-    }, selected === m.id ? 'primary supervision-list-item' : 'secondary supervision-list-item'));
+    }, selected === m.id ? 'primary supervision-list-item' : 'secondary supervision-list-item'));list.append(row);
+    }
     leaseList.replaceChildren(element('p', '', '占用按任务声明的文件范围判断。共用项目目录或存在其他活动聊天不会锁住整个项目；独立研究使用独立产物目录。不确定的实际占用仍保留，此保护不能禁止手动修改。'));
     if(!snapshot.leases.length)leaseList.append(element('p','','没有保留的文件占用。'));
     for (const lease of snapshot.leases) {

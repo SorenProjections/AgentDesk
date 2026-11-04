@@ -35,6 +35,28 @@ restoreRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,'res
 const deletedFilter=element('label','run-history-filter','已删除记录'),showDeletedRuns=element('input');showDeletedRuns.type='checkbox';deletedFilter.prepend(showDeletedRuns);$('runSearch').closest('.list-toolbar').after(deletedFilter);
 showDeletedRuns.addEventListener('change',()=>{selectedRunId=null;renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));});
 const visibleRuns=()=>state.runs.filter(run=>!!run.deletedAt===showDeletedRuns.checked);
+const pickedRuns=new Set(),runBatch=element('div','history-batch');
+const pickRuns=element('button','text-button','全选已结束记录'),clearPickedRuns=element('button','text-button','取消选择'),removePickedRuns=element('button','text-button danger','删除所选');
+for(const button of [pickRuns,clearPickedRuns,removePickedRuns])button.type='button';
+runBatch.append(pickRuns,clearPickedRuns,removePickedRuns);deletedFilter.after(runBatch);
+const searchedRuns=()=>[...visibleRuns()].reverse().filter(run=>!$('runSearch').value.trim()||[run.taskTitle,providerNames[run.provider],names[run.status]].join(' ').toLowerCase().includes($('runSearch').value.trim().toLowerCase()));
+function updateRunSelection(){
+  const allowed=new Set(searchedRuns().filter(run=>!activeStates.has(run.status)).map(run=>run.id));
+  for(const id of pickedRuns)if(!allowed.has(id))pickedRuns.delete(id);
+  clearPickedRuns.hidden=!pickedRuns.size;
+  removePickedRuns.textContent=(showDeletedRuns.checked?'恢复所选':'删除所选')+(pickedRuns.size?'（'+pickedRuns.size+'）':'');
+  removePickedRuns.disabled=!state.historyManagement||!pickedRuns.size;
+  pickRuns.disabled=!state.historyManagement||!allowed.size;
+}
+pickRuns.addEventListener('click',()=>{for(const run of searchedRuns())if(!activeStates.has(run.status))pickedRuns.add(run.id);renderRunList();});
+clearPickedRuns.addEventListener('click',()=>{pickedRuns.clear();renderRunList();});
+removePickedRuns.addEventListener('click',async()=>{
+  updateRunSelection();const ids=[...pickedRuns],action=showDeletedRuns.checked?'restore':'delete';if(!ids.length)return;
+  if(!await confirmAction((action==='delete'?'删除':'恢复')+'所选 '+ids.length+' 条运行记录？删除后可从“已删除记录”恢复；项目文件、客户端对话和文件保护保留。',{title:'批量管理运行记录',accept:action==='delete'?'删除所选':'恢复所选',danger:action==='delete'}))return;
+  removePickedRuns.disabled=true;
+  try{await api('runs/history','POST',{ids,action});pickedRuns.clear();await refreshState();await refreshRun();toast(action==='delete'?'所选记录已删除。':'所选记录已恢复。');}
+  catch(error){toast(error.message,true);}finally{updateRunSelection();}
+});
 async function manageRunHistory(id,action){
   const run=state.runs.find(row=>row.id===id);if(!run)return;
   if(!state.historyManagement){toast('记录管理更新已准备；当前任务结束后重新启动后台即可使用。',true);return;}
@@ -380,11 +402,14 @@ function renderRunOptions() {
 }
 
 function renderRunList(){
-  const search=$('runSearch').value.trim().toLowerCase();
-  const runs=[...visibleRuns()].reverse().filter(run=>!search || [run.taskTitle,providerNames[run.provider],names[run.status]].join(' ').toLowerCase().includes(search));
+  const runs=searchedRuns();updateRunSelection();
   $('runList').replaceChildren();
   if(!runs.length)$('runList').append(element('p','run-list-empty',state.runs.length?'没有符合条件的运行记录。':'还没有运行记录。\n发送任务后，执行结果会保存在这里。'));
-  for(const run of runs){const button=element('button','run-item'+(run.id===selectedRunId?' selected':''));button.type='button';button.append(element('strong','',run.taskTitle));const meta=element('span','run-meta');meta.append(element('span','',shortFormat.format(new Date(run.startedAt))),element('span','badge '+run.status,names[run.status] || run.status));button.append(meta);button.addEventListener('click',()=>openRun(run.id));$('runList').append(button);}
+  for(const run of runs){
+    const row=element('div','history-select-row'),check=element('input');check.type='checkbox';check.setAttribute('aria-label','选择运行记录：'+run.taskTitle);check.checked=pickedRuns.has(run.id);check.disabled=activeStates.has(run.status)||!state.historyManagement;
+    check.addEventListener('change',()=>{check.checked?pickedRuns.add(run.id):pickedRuns.delete(run.id);updateRunSelection();});
+    const button=element('button','run-item'+(run.id===selectedRunId?' selected':''));button.type='button';button.append(element('strong','',run.taskTitle));const meta=element('span','run-meta');meta.append(element('span','',shortFormat.format(new Date(run.startedAt))),element('span','badge '+run.status,names[run.status] || run.status));button.append(meta);button.addEventListener('click',()=>openRun(run.id));row.append(check,button);$('runList').append(row);
+  }
 }
 function openRun(id){showDeletedRuns.checked=!!state.runs.find(run=>run.id===id)?.deletedAt;selectedRunId=id;requestSignature='';workspace.showRun();renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));}
 
