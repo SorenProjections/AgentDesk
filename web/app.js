@@ -29,6 +29,8 @@ const sessionsView = new SessionsView({ refresh: () => refreshState(), openRun: 
 async function continueSession(session) {
   if (!await resetForm()) return;
   $('provider').value = session.provider; $('cwd').value = session.cwd || '';
+  if (session.nativeProjectId) { $('nativeProject').append(new Option(session.nativeProjectName || session.nativeProjectId,session.nativeProjectId)); $('nativeProject').value = session.nativeProjectId; }
+  if (session.provider === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true));
   $('taskTitle').value = '接续：' + (session.alias || session.name);
   document.querySelector('input[name="threadMode"][value="existing"]').checked = true;
   $('triggerType').value = 'queue'; savedThread = {id:session.nativeId,name:session.name};
@@ -71,6 +73,7 @@ const formatDate = value => dateFormat.format(new Date(value));
 const chinaInput = value => new Date(value + 8 * 3600000).toISOString().slice(0, 19);
 const parseTime = value => Date.parse(value + (value.length === 16 ? ':00' : '') + '+08:00');
 const folderName = value => value?.split(/[\\/]/).filter(Boolean).at(-1) || value || '';
+const usesLocalFiles = provider => provider !== 'doubaoDesktop' && state.providers?.find(row => row.id === provider)?.capabilities.localFiles !== false;
 
 function taskStatus(task) {
   const live = state.runs.find(run => run.taskId === task.id && activeStates.has(run.status));
@@ -94,8 +97,8 @@ function renderTaskList() {
     const top=element('span','task-top');
     top.append(element('span','task-name',task.title));
     content.append(top);
-    const folder = element('span', 'task-folder', providerNames[task.provider || 'codex'] + ' · ' + folderName(task.cwd));
-    folder.title = task.cwd;
+    const folder = element('span', 'task-folder', providerNames[task.provider || 'codex'] + ' · ' + (usesLocalFiles(task.provider) ? folderName(task.cwd) : task.nativeProjectName || '普通聊天'));
+    folder.title = usesLocalFiles(task.provider) ? task.cwd : '直接发送聊天消息，不使用本地项目目录';
     content.append(folder);
     const bottom = element('span', 'task-bottom');
     const next = task.times.find(slot => slot.state === 'pending');
@@ -170,23 +173,47 @@ function updateSummary() {
 }
 
 function toggleThreadMode() {
-  const newOnly = $('provider').value === 'doubaoDesktop';
+  const chat = $('provider').value === 'doubaoDesktop';
+  const newOnly = $('provider').value !== 'codex' && state.providers?.find(row => row.id === $('provider').value)?.capabilities.resume === false;
   for (const value of ['existing','previous']) {
     const radio = document.querySelector('input[name="threadMode"][value="'+value+'"]');
     radio.disabled = newOnly || (value === 'previous' && $('triggerType').value !== 'afterTask');
     if (newOnly && radio.checked) document.querySelector('input[name="threadMode"][value="new"]').checked = true;
   }
-  $('newThreadHelp').textContent = newOnly ? '每次发送都会新建豆包对话。项目路径仅用于面板归档，不代表豆包可以访问该目录。停止运行仅停止监控，生成请在豆包中停止。' : '执行时新建对话；多个发送时间继续使用同一个对话。';
+  $('newThreadHelp').textContent = chat ? '首次在所选豆包项目中新建对话；后续周期继续使用该对话。不指定项目时新建普通聊天。停止运行仅停止监控，生成请在豆包中停止。' : '执行时新建对话；多个发送时间继续使用同一个对话。';
   const existing = document.querySelector('input[name="threadMode"]:checked').value === 'existing';
   $('existingThreadField').hidden = !existing;
   $('newThreadHelp').hidden = document.querySelector('input[name="threadMode"]:checked').value !== 'new';
   const desktop = ['antigravityDesktop', 'workbuddyDesktop', 'doubaoDesktop'].includes($('provider').value);
   $('threadSelect').required = existing && ($('provider').value === 'codex' || desktop);
   $('manualThreadField').hidden = $('provider').value === 'codex' || desktop;
-  if (existing && $('cwd').value.trim()) void loadThreads().catch(error => toast(error.message, true));
+  if (existing && (!usesLocalFiles($('provider').value) || $('cwd').value.trim())) void loadThreads().catch(error => toast(error.message, true));
+}
+
+async function loadNativeProjects() {
+  if ($('provider').value !== 'doubaoDesktop') return;
+  const selected = $('nativeProject').value;
+  const data = await api('projects?provider=doubaoDesktop');
+  if ($('provider').value !== 'doubaoDesktop' || $('nativeProject').value !== selected) return;
+  $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
+  for (const project of data.projects) $('nativeProject').append(new Option(project.name,project.id));
+  if (selected && !data.projects.some(row => row.id === selected)) $('nativeProject').append(new Option('已保存项目（请在豆包展开后刷新）',selected));
+  $('nativeProject').value = selected;
 }
 
 async function loadThreads(more = false) {
+  if (!usesLocalFiles($('provider').value)) {
+    const projectId = $('nativeProject').value;
+    const selected = $('threadSelect').value || savedThread?.id || '';
+    const data = await api('threads?provider=' + encodeURIComponent($('provider').value) + '&projectId=' + encodeURIComponent(projectId));
+    if (usesLocalFiles($('provider').value) || projectId !== $('nativeProject').value) return;
+    loadedThreads = data.threads; threadCursor = null;
+    $('threadSelect').replaceChildren(new Option(data.threads.length ? '选择豆包已有对话' : '请在豆包打开对话或展开项目后刷新',''));
+    for (const thread of data.threads) $('threadSelect').append(new Option(thread.name,thread.id));
+    if (selected && !data.threads.some(row => row.id === selected) && savedThread?.id === selected) $('threadSelect').append(new Option(savedThread.name,selected));
+    $('threadSelect').value = selected; $('moreThreads').hidden = true;
+    return;
+  }
   const requestedCwd = $('cwd').value.trim();
   if (!requestedCwd) return;
   $('refreshThreads').disabled = true;
@@ -251,6 +278,10 @@ async function loadTask(task,{force=false}={}) {
   selectedTaskId = task.id;
   savedThread = task.threadId ? { id: task.threadId, name: task.threadTitle || task.title } : null;
   $('provider').value = task.provider || 'codex';
+  $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
+  if (task.nativeProjectId) $('nativeProject').append(new Option(task.nativeProjectName || task.nativeProjectId,task.nativeProjectId));
+  $('nativeProject').value = task.nativeProjectId || '';
+  if (task.provider === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true));
   $('triggerType').value = task.trigger?.type || 'time';
   $('repeatFrequency').value = task.trigger?.recurrence?.frequency || 'once';
   $('repeatTime').value = task.trigger?.recurrence?.time || '09:00';
@@ -408,7 +439,7 @@ async function refreshRun() {
   currentRun = run;
   $('copyOutput').disabled=false;
   $('runTitle').textContent=run.taskTitle;
-  $('runProvider').textContent=providerNames[run.provider || 'codex']+' · '+folderName(run.cwd);
+  $('runProvider').textContent=providerNames[run.provider || 'codex']+' · '+(usesLocalFiles(run.provider) ? folderName(run.cwd) : run.nativeProjectName || '普通聊天');
   $('runPrompt').textContent=run.prompt;
   $('runStatus').className = 'badge ' + run.status;
   $('runStatus').textContent = names[run.status] || run.status;
@@ -459,7 +490,8 @@ $('taskForm').addEventListener('submit', async event => {
   const input = {
     provider: $('provider').value, revision: editingRevision, editToken, timeoutMinutes: Number($('timeoutMinutes').value),
     trigger: { type: $('triggerType').value, taskId: $('afterTask').value, runId: $('afterRun').value || null, onFailure: $('onFailure').value },
-    title: $('taskTitle').value, cwd: $('cwd').value, prompt: $('prompt').value, times,
+    title: $('taskTitle').value, cwd: usesLocalFiles($('provider').value) ? $('cwd').value : '', prompt: $('prompt').value, times,
+    nativeProjectId: $('provider').value === 'doubaoDesktop' ? $('nativeProject').value : '',
     threadMode: document.querySelector('input[name="threadMode"]:checked').value,
     threadId, threadTitle: loadedThreads.find(thread => thread.id === threadId)?.name || savedThread?.name || '',
     sandbox: $('sandbox').value, approval: $('approval').value, latePolicy: $('latePolicy').value,
@@ -546,6 +578,10 @@ $('duplicateTask').addEventListener('click', async () => {
   $('provider').value = task.provider || 'codex';
   renderProviderHelp();
   $('cwd').value = task.cwd;
+  $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
+  if (task.nativeProjectId) $('nativeProject').append(new Option(task.nativeProjectName || task.nativeProjectId,task.nativeProjectId));
+  $('nativeProject').value = task.nativeProjectId || '';
+  void loadNativeProjects().catch(error => toast(error.message,true));
   $('prompt').value = task.prompt;
   $('promptCount').textContent = task.prompt.length + ' 字';
   $('sandbox').value = task.sandbox;
@@ -613,13 +649,17 @@ function toggleTrigger() {
   $('timeList').querySelectorAll('input').forEach(input => { input.required = kind === 'time' && !repeating; });
   $('triggerHelp').textContent = kind === 'time' ? (repeating ? '按北京时间持续重复，暂停或删除任务后停止。后台关闭或电脑睡眠时不能发送；恢复后最多补跑一次，或按高级设置跳过。' : '每个时间发送一次；发送前可编辑。') : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
   const previous = document.querySelector('input[name="threadMode"][value="previous"]');
-  previous.disabled = $('provider').value === 'doubaoDesktop' || kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
+  previous.disabled = kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
   if (kind !== 'afterTask' && previous.checked) { document.querySelector('input[name="threadMode"][value="new"]').checked = true; toggleThreadMode(); }
   updateSummary();
 }
 
 function renderProviderHelp() {
   const id = $('provider').value;
+  $('projectFields').hidden = !usesLocalFiles(id);
+  $('cwd').required = usesLocalFiles(id);
+  $('nativeProjectFields').hidden = id !== 'doubaoDesktop';
+  $('threadSelectLabel').textContent = id === 'doubaoDesktop' ? '豆包已有对话（客户端已加载）' : '项目中的已有对话';
   const provider = state.providers?.find(provider => provider.id === id);
   const desktop = provider?.capabilities.desktop;
   $('providerHelp').textContent = id === 'codex' ? '使用 Codex 本地接口，支持已有对话和权限处理。' : `${provider?.detail || '等待后台检测'}。` + (desktop ? '直接发送到桌面会话；权限确认和提问请在原客户端处理。' : '使用独立 CLI 入口，版本和登录可能与桌面端不同。');
@@ -678,6 +718,10 @@ $('followTask').addEventListener('click', async () => {
   const parent = state.tasks.find(task => task.id === selectedTaskId);
   if(!await resetForm())return;
   $('provider').value = parent.provider || 'codex'; $('cwd').value = parent.cwd;
+  $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
+  if (parent.nativeProjectId) $('nativeProject').append(new Option(parent.nativeProjectName || parent.nativeProjectId,parent.nativeProjectId));
+  $('nativeProject').value = parent.nativeProjectId || '';
+  void loadNativeProjects().catch(error => toast(error.message,true));
   $('taskTitle').value = parent.title + ' · 后续';
   $('triggerType').value = 'afterTask'; renderDependencies(parent.id);
   const capabilities = state.providers?.find(provider => provider.id === parent.provider)?.capabilities;
@@ -688,9 +732,11 @@ $('followTask').addEventListener('click', async () => {
 $('triggerType').addEventListener('change', toggleTrigger);
 $('repeatFrequency').addEventListener('change', toggleTrigger);
 $('repeatTime').addEventListener('input', updateSummary);
+$('refreshProjects').addEventListener('click', () => loadNativeProjects().catch(error => toast(error.message,true)));
+$('nativeProject').addEventListener('change', () => { savedThread = null; $('threadSelect').value = ''; void loadThreads().catch(error => toast(error.message,true)); });
 document.querySelectorAll('input[name="weekday"]').forEach(input => input.addEventListener('change', updateSummary));
 $('afterTask').addEventListener('change', () => renderDependencyRuns());
-$('provider').addEventListener('change', () => { savedThread = null; $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); });
+$('provider').addEventListener('change', () => { savedThread = null; $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); if ($('provider').value === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true)); });
 $('toggleQueue').addEventListener('click', async () => { try { await api('settings', 'POST', { queuePaused: !state.settings?.queuePaused }); await refreshState(); } catch (error) { toast(error.message, true); } });
 for (const key of ['pauseOnFailure', 'keepAwake', 'autostart']) $(key).addEventListener('change', async () => { try { await api('settings', 'POST', { [key]: $(key).checked }); await refreshState(); } catch (error) { toast(error.message, true); await refreshState(); } });
 window.addEventListener('pagehide', () => {

@@ -50,7 +50,7 @@ const nativeCodex = new NativeCodexObserver();
 const nativeWorkBuddy = new NativeWorkBuddyObserver();
 const sessions = new SessionHub(store, { sources: [
   { id: 'codex', name: 'Codex', detail: '最近 250 个会话及已关注会话；只读本机记录', list: known => nativeCodex.listSessions(known), close: () => nativeCodex.close() },
-  ...['antigravityDesktop','workbuddyDesktop'].map(id => {
+  ...['antigravityDesktop','workbuddyDesktop','doubaoDesktop'].map(id => {
     const provider = providers.get(id); let nextProbe = Date.now() + 60000;
     const source = { id, name: provider.name, detail: '最近 60 个会话、已关注会话及列表中的运行任务', list: async known => {
       if (!provider.available && !provider.checking && Date.now() >= nextProbe) { nextProbe = Date.now() + 60000; await provider.probe(); }
@@ -59,7 +59,7 @@ const sessions = new SessionHub(store, { sources: [
         const rows = await nativeWorkBuddy.listSessions(known);
         return rows;
       }
-      source.detail = '最近 60 个会话、已关注会话及列表中的运行任务';
+      source.detail = id === 'doubaoDesktop' ? '客户端侧栏已加载的项目与对话；只观察当前聊天生成状态' : '最近 60 个会话、已关注会话及列表中的运行任务';
       return (await provider.listSessions(known)).map(row => ({...row,readOnly:false}));
     } };return source;
   }),
@@ -238,12 +238,22 @@ const server = http.createServer(async (request, response) => {
       request.on('close', () => { clearInterval(heartbeat); clients.delete(response); });
       return;
     }
+    if (request.method === 'GET' && url.pathname === '/api/projects') {
+      const provider = providers.get(url.searchParams.get('provider'));
+      if (!provider?.listProjects) throw new Error('这个 Agent 不提供客户端项目列表。');
+      return send(response, 200, {projects:await provider.listProjects()});
+    }
     if (request.method === 'GET' && url.pathname === '/api/threads') {
       const provider = url.searchParams.get('provider') || 'codex';
       if (provider !== 'codex') {
         if (!providers.has(provider)) throw new Error('Agent 接入不存在。');
         const folder = url.searchParams.get('cwd');
-        if (providers.get(provider).listThreads) return send(response, 200, { threads: await providers.get(provider).listThreads(folder), nextCursor: null });
+        if (providers.get(provider).listThreads) {
+          let threads = await providers.get(provider).listThreads(folder);
+          const projectId = url.searchParams.get('projectId');
+          if (projectId) threads = threads.filter(row => row.projectId === projectId);
+          return send(response, 200, { threads, nextCursor: null });
+        }
         const seen = new Set();
         const threads = store.data.runs.slice().reverse().filter(run => {
           if (run.provider !== provider || !run.threadId || seen.has(run.threadId) || (folder && path.normalize(run.cwd).toLowerCase() !== path.normalize(folder).toLowerCase())) return false;

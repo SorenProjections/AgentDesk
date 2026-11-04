@@ -5,25 +5,44 @@ import { Scheduler } from '../lib/scheduler.mjs';
 import { DoubaoDesktop, doubaoPage } from '../lib/doubao-desktop.mjs';
 
 function fixture(options = {}) {
-  let now = 1000, stage = 'old', polls = 0, sends = 0, output;
+  let now = 1000, stage = 'old', polls = 0, sends = 0, output, captured, opened, created;
+  const baseline = options.existing ? [{id:'old-user',role:'user',text:'hello'}, {id:'old-assistant',role:'assistant',text:'old answer',finished:true}] : [];
   const provider = new DoubaoDesktop({ clock: () => now, pause: async ms => { now += ms; } });
   provider.available = true;
   provider.page = async (action = 'read', prompt) => {
-    if (action === 'new') { stage = 'new'; return true; }
-    if (action === 'fill') { assert.equal(prompt, 'hello'); return true; }
+    if (action === 'new') { stage = 'new'; created = prompt; return true; }
+    if (action === 'open') { stage = 'existing'; opened = prompt; return true; }
+    if (action === 'fill') { assert.equal(prompt.prompt, 'hello'); assert.equal(prompt.baseline,JSON.stringify(baseline)); return true; }
     if (action === 'send') { sends++; stage = 'sent'; if (options.lostSend) throw new Error('connection lost'); return true; }
-    if (stage !== 'sent') return { ready: true, draft: '', busy: false, messages: [] };
+    if (stage !== 'sent') return { ready: true, draft: '', busy: false, messages: baseline,threadId:options.existing ? '456' : null,projectId:options.projectId || null,href:'chrome://doubao-chat/chat/456' };
     polls++;
     const messages = [{ role: 'user', text: 'hello' }, { role: 'assistant', text: polls < 3 ? 'partial' : 'answer', streaming: polls < 3, finished: polls >= 3 }];
     if (options.placeholder && polls === 1) messages[0].text = '';
     if (options.interference) messages.push({ role: 'user', text: 'human message' });
     if (options.noFinish) messages[1].finished = false;
     if (options.disconnected) throw new Error('connection lost');
-    return { ready: true, draft: '', busy: polls < 3, canSend: false, href: options.nativeRedirect ? 'chrome://doubao-chat/chat/' + (polls < 3 ? 'local_123' : '456') : options.switchChat && polls > 1 ? 'other' : 'chat', messages };
+    if (options.rewriteHistory && polls > 1) baseline[0].text='changed';
+    return { ready: true, draft: '', busy: polls < 3, canSend: false, threadId:options.nativeRedirect && polls<3 ? null : '456',projectId:options.projectId || null,href:options.existing ? 'chrome://doubao-chat/chat/456' : options.nativeRedirect ? 'chrome://doubao-chat/chat/' + (polls < 3 ? 'local_123' : '456') : options.switchChat && polls > 1 ? 'other' : 'chat', messages:baseline.concat(messages) };
   };
-  const start = (task = {}, run = {}) => provider.start({ threadMode: 'new', timeoutMinutes: 0.25, ...task }, { prompt: 'hello', ...run }, { output: text => { output = text; } });
-  return { provider, start, get sends() { return sends; }, get polls() { return polls; }, get output() { return output; } };
+  const start = (task = {}, run = {}) => provider.start({ threadMode: 'new', timeoutMinutes: 0.25, ...task }, { prompt: 'hello', ...run }, { output: text => { output = text; },thread:id=>{captured=id;} });
+  return { provider, start, get sends() { return sends; }, get polls() { return polls; }, get output() { return output; },get captured(){return captured;},get opened(){return opened;},get created(){return created;} };
 }
+
+test('Doubao resumes the exact existing project conversation and ignores its old matching prompt/reply', async () => {
+  const f=fixture({existing:true,projectId:'project-1'});
+  assert.equal((await f.start({threadMode:'existing',nativeProjectId:'project-1'},{threadId:'456'}).completion).status,'completed');
+  assert.deepEqual(f.opened,{id:'456',projectId:'project-1'});
+  assert.equal(f.created,undefined); assert.equal(f.sends,1); assert.equal(f.output,'answer');
+});
+
+test('Doubao creates in the selected native project and captures the saved conversation ID', async () => {
+  const f=fixture({nativeRedirect:true,projectId:'project-1'});
+  assert.equal((await f.start({nativeProjectId:'project-1'}).completion).status,'completed');
+  assert.deepEqual(f.created,{projectId:'project-1'}); assert.equal(f.captured,'456');
+  const mismatch=fixture({existing:true,projectId:'other'});
+  assert.equal((await mismatch.start({threadMode:'existing',nativeProjectId:'project-1'},{threadId:'456'}).completion).status,'failed');
+  assert.equal(mismatch.sends,0);
+});
 
 test('Doubao waits for the new turn, finished controls and stable text even when send is disabled', async () => {
   const f = fixture();
@@ -45,7 +64,7 @@ test('Doubao never treats partial text, transport ambiguity or changed conversat
   }
 });
 
-test('Doubao rejects unsupported continuation/model, expired runs and concurrent UI access', async () => {
+test('Doubao rejects missing continuation targets, model overrides, expired runs and concurrent UI access', async () => {
   for (const [task, run] of [[{ threadMode: 'existing' }, {}], [{ model: 'x' }, {}], [{}, { startedAt: -1000000 }]]) {
     const f = fixture(); assert.equal((await f.start(task, run).completion).status, 'failed'); assert.equal(f.sends, 0);
   }
@@ -75,7 +94,7 @@ test('Doubao launch refuses to close a running client', async () => {
 
 test('scheduler serializes Doubao across independent folders while other providers remain parallel', () => {
   const p = new DoubaoDesktop();
-  const context = { isTaskActive: () => false, providers: new Map([[p.id, p]]), activeRuns: new Map([['r', { task: { cwd: 'E:\\one' }, run: { provider: p.id } }]]), concurrencyLimit: 4 };
+  const context = { isTaskActive: () => false, usesLocalFiles: Scheduler.prototype.usesLocalFiles, providers: new Map([[p.id, p]]), activeRuns: new Map([['r', { task: { provider:p.id, cwd: 'E:\\one' }, run: { provider: p.id } }]]), concurrencyLimit: 4 };
   const task = { provider: p.id, cwd: 'E:\\two' };
   assert.match(Scheduler.prototype.concurrencyBlocker.call(context, task), /一次只能/);
   assert.equal(Scheduler.prototype.concurrencyBlocker.call(context, { ...task, provider: 'codex' }), null);

@@ -18,7 +18,7 @@ function button(text, action, className = 'quiet', symbol) {
 }
 
 function providerMark(provider) {
-  const mark = element('span', 'provider-mark ' + provider, provider === 'codex' ? 'C' : provider.startsWith('antigravity') ? 'A' : 'W');
+  const mark = element('span', 'provider-mark ' + provider, provider === 'codex' ? 'C' : provider === 'doubaoDesktop' ? '豆' : provider.startsWith('antigravity') ? 'A' : 'W');
   mark.setAttribute('aria-hidden', 'true');
   return mark;
 }
@@ -126,7 +126,7 @@ export class SessionsView {
     const search = $('sessionSearch').value.toLowerCase().trim(), provider = $('sessionProvider').value;
     const scoped = this.hub.sessions.filter(session => {
       if (provider !== 'all' && (provider === 'cli' ? !['workbuddy', 'antigravity'].includes(session.provider) : session.provider !== provider)) return false;
-      return !search || [session.alias, session.name, session.cwd, session.note, session.nativeId, names[session.provider]].join(' ').toLowerCase().includes(search);
+      return !search || [session.alias, session.name, session.cwd, session.nativeProjectName, session.note, session.nativeId, names[session.provider]].join(' ').toLowerCase().includes(search);
     });
     document.querySelectorAll('[data-session-filter]').forEach(node => {
       const selected = node.dataset.sessionFilter === this.filter;
@@ -154,8 +154,9 @@ export class SessionsView {
       const body = element('span', 'session-row-body'), heading = element('span', 'session-row-title');
       heading.append(element('strong', '', title(session)));
       if (session.pinned) { const pin = icon('pin'); pin.classList.add('pin-icon'); heading.append(pin); }
-      const meta = element('span', 'session-row-meta'); meta.title = session.cwd || '未关联项目';
-      meta.append(element('span', 'session-provider-name', names[session.provider] || session.provider), icon('folder'), element('span', 'session-folder', folderName(session.cwd)));
+      const project = session.provider === 'doubaoDesktop' ? session.nativeProjectName || '普通聊天' : folderName(session.cwd);
+      const meta = element('span', 'session-row-meta'); meta.title = session.cwd || project;
+      meta.append(element('span', 'session-provider-name', names[session.provider] || session.provider), icon('folder'), element('span', 'session-folder', project));
       const evidence = `${session.disconnected ? '连接中断，上次状态：' : !session.watched ? '未关注提醒：' : ''}${session.evidence || ''}`;
       const detail = element('span', 'session-row-evidence', evidence); detail.title = evidence;
       body.append(heading, meta, detail);
@@ -186,7 +187,7 @@ export class SessionsView {
     const badge = element('span', 'badge ' + (session.disconnected ? 'uncertain' : session.status), session.disconnected ? '未同步' : labels[session.status] || session.status); badge.dataset.detailStatus = '';
     panel.append(heading, badge, element('p', 'detail-evidence', session.evidence || '暂无状态说明'));
     const facts = element('dl', 'session-facts');
-    for (const [label, value] of [['项目文件夹', session.cwd || '未关联项目'], ['会话编号', session.nativeId || '等待创建']]) facts.append(element('dt', '', label), element('dd', '', value));
+    for (const [label, value] of [[session.provider === 'doubaoDesktop' ? '豆包项目' : '项目文件夹', session.provider === 'doubaoDesktop' ? session.nativeProjectName || '普通聊天' : session.cwd || '未关联项目'], ['会话编号', session.nativeId || '等待创建']]) facts.append(element('dt', '', label), element('dd', '', value));
     panel.append(facts);
     const actions = element('div', 'session-actions');
     for (const [id, label, input, symbol] of [
@@ -199,7 +200,7 @@ export class SessionsView {
     const primaryActions = element('div', 'session-primary-actions');
     if (session.provider === 'codex' && session.nativeId) { const link = element('a', 'primary', '在 Codex 打开'); link.href = 'codex://threads/' + encodeURIComponent(session.nativeId); primaryActions.append(link); }
     if (session.runId) primaryActions.append(button('查看执行记录', () => { panel.close(); this.openRun(session.runId); }, 'secondary'));
-    if (session.nativeId && session.cwd && !active.has(session.status) && !session.disconnected && session.status !== 'uncertain' && !session.readOnly) primaryActions.append(button('安排接续消息', () => { panel.close(); return this.continueSession(session); }, 'secondary', 'plus'));
+    if (session.nativeId && (session.cwd || session.provider === 'doubaoDesktop') && !active.has(session.status) && !session.disconnected && session.status !== 'uncertain' && !session.readOnly) primaryActions.append(button('安排接续消息', () => { panel.close(); return this.continueSession(session); }, 'secondary', 'plus'));
     if (primaryActions.childElementCount) panel.append(primaryActions);
     if (session.provider !== 'codex') panel.append(element('p', 'field-help', '权限请求和追问请在原客户端处理，可用会话编号查找此对话。'));
     if (session.readOnly) panel.append(element('p', 'field-help', '当前通过原生记录观察。启用桌面桥后，可安排接续消息。'));
