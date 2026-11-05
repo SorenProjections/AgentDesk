@@ -301,6 +301,7 @@ body:has(dialog[open]) { overflow: hidden; }
 .task-date { font-size: 12px; color: #62738d; }
 .task-reason { display: block; font-size: 11px; color: var(--warning); margin-top: 8px; }
 .queue-moves { display: flex; flex-direction: column; justify-content: center; padding: 8px 8px 8px 0; gap: 3px; }
+.queue-delete { align-self: center; flex-shrink: 0; margin-right: 10px; padding: 6px 8px; }
 .queue-moves .quiet { width: 28px; min-height: 28px; padding: 3px; font-size: 15px; }
 .has-editor .task-item { padding: 18px 14px; gap: 10px; }
 .has-editor .task-top { flex-direction: column; gap: 7px; }

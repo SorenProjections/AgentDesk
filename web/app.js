@@ -165,6 +165,16 @@ function renderTaskList() {
       }
       row.append(moves);
     }
+    const remove = element('button', 'quiet danger queue-delete', '删除');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', '删除任务：' + task.title);
+    remove.disabled = state.runs.some(run => run.taskId === task.id && activeStates.has(run.status));
+    remove.addEventListener('click', async () => {
+      remove.disabled = true;
+      try { await deleteQueueTask(task.id); }
+      finally { remove.disabled = false; }
+    });
+    row.append(remove);
     row.title = task.queueStatus?.reason || '';
     $('taskList').append(row);
   }
@@ -512,6 +522,13 @@ async function refreshState() {
   refreshing = true;
   try {
     state = await api('state');
+    // Also support a backend that was started before queue/history filtering existed.
+    const deletedMissions = new Set((state.supervision?.missions || []).filter(mission => mission.deletedAt).map(mission => mission.id));
+    state.tasks = state.tasks.filter(task => !deletedMissions.has(task.missionId));
+    if (selectedTaskId && !state.tasks.some(task => task.id === selectedTaskId)) {
+      formDirty = false;
+      await resetForm(false);
+    }
     serverOffset = state.serverTime - Date.now();
     const connection = state.connection;
     $('engineStatus').textContent = '后台在线';
@@ -618,11 +635,26 @@ $('runTask').addEventListener('click', async () => {
   } catch (error) { toast(error.message, true); }
   finally { renderTaskActions(); }
 });
-$('deleteTask').addEventListener('click', async () => {
-  if (!await confirmAction('删除这条任务及其未来发送时间。已有运行记录会保留。',{title:'删除任务',accept:'删除任务',danger:true})) return;
-  try { await api('tasks/' + selectedTaskId, 'DELETE'); formDirty=false;resetForm(false); await refreshState(); toast('任务已删除，运行记录已保留。'); }
+async function deleteQueueTask(id) {
+  const task = state.tasks.find(task => task.id === id);
+  if (!task) return;
+  const message = task.missionId
+    ? '删除“' + task.title + '”所属的督导任务及其全部队列指令。未发送的指令将暂停，运行记录、验收证据和文件保护保留，可在任务督导的“已删除任务”中恢复。'
+    : '删除“' + task.title + '”及其未来发送时间。已有运行记录会保留。';
+  if (!await confirmAction(message,{title:'删除任务',accept:'删除任务',danger:true})) return;
+  try {
+    if (task.missionId) await api('supervision/history', 'POST', { ids: [task.missionId], action: 'delete' });
+    else await api('tasks/' + id, 'DELETE');
+    if (selectedTaskId === id || (task.missionId && state.tasks.find(item => item.id === selectedTaskId)?.missionId === task.missionId)) {
+      formDirty = false;
+      await resetForm(false);
+    }
+    await refreshState();
+    toast(task.missionId ? '督导任务及其指令已移出队列，可在“已删除任务”恢复。' : '任务已删除，运行记录已保留。');
+  }
   catch (error) { toast(error.message, true); }
-});
+}
+$('deleteTask').addEventListener('click', () => deleteQueueTask(selectedTaskId));
 $('duplicateTask').addEventListener('click', async () => {
   const task = state.tasks.find(task => task.id === selectedTaskId);
   if(!await resetForm())return;

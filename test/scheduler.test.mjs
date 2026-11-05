@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../lib/store.mjs';
 import { Scheduler } from '../lib/scheduler.mjs';
+import { Supervision } from '../lib/supervision.mjs';
+import { updateMissionHistory } from '../lib/mission-history.mjs';
 
 const scratch = path.resolve(process.env.CODEX_SCHEDULER_TEST_DATA || path.join(path.dirname(fileURLToPath(import.meta.url)), '../work/scheduler-tests'));
 mkdirSync(scratch, { recursive: true });
@@ -48,6 +50,44 @@ function fixture(t) {
   return { folder, store, client, scheduler, setNow(value) { now = value; }, now: () => now,
     draft: { title: 'One shot', cwd: folder, threadMode: 'new', prompt: 'Run this once', times: [now + 10000] } };
 }
+
+test('deleting a mission removes all its instructions from the queue and restoring keeps them paused', async t => {
+  const f = fixture(t);
+  const supervision = new Supervision(f.store, f.scheduler, { clock: f.now });
+  const first = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
+  const correction = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
+  const ordinary = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
+  first.missionId = correction.missionId = 'old';
+  first.trigger.state = 'completed';
+  f.store.data.missions.push({ id: 'old', title: 'Old mission', state: 'scheduled', instructions: [{ taskId: first.id }, { taskId: correction.id }], reviews: [{ id: 'proof', packet: { output: 'evidence' } }] });
+  f.store.data.runs.push({ id: 'past', taskId: first.id, missionId: 'old', status: 'completed', output: 'result' });
+  f.store.data.fileLeases.push({ id: 'lease', owner: 'old', state: 'held' });
+  updateMissionHistory(supervision, ['old'], 'delete');
+  assert.deepEqual(f.scheduler.snapshot().tasks.map(task => task.id), [ordinary.id]);
+  assert.equal(f.scheduler.snapshot().runs[0].id, 'past');
+  assert.equal(f.store.data.tasks.length, 3);
+  assert.equal(f.store.data.missions[0].reviews[0].packet.output, 'evidence');
+  assert.equal(f.store.data.fileLeases[0].state, 'held');
+  assert.doesNotThrow(() => f.scheduler.reorder([ordinary.id]));
+  const restarted = new Scheduler(new Store(f.store.file), f.client, { clock: f.now });
+  t.after(() => restarted.stop());
+  assert.deepEqual(restarted.snapshot().tasks.map(task => task.id), [ordinary.id]);
+  updateMissionHistory(supervision, ['old'], 'restore');
+  assert.equal(f.scheduler.snapshot().tasks.length, 3);
+  assert.equal(first.paused, true);
+  assert.equal(correction.paused, true);
+  assert.equal(ordinary.paused, false);
+});
+
+test('a paused ordinary task can be deleted while preserving its execution records', async t => {
+  const f = fixture(t);
+  const task = await f.scheduler.saveTask(f.draft);
+  f.scheduler.pause(task.id, true);
+  f.store.data.runs.push({ id: 'past', taskId: task.id, status: 'completed', output: 'result' });
+  f.scheduler.remove(task.id);
+  assert.equal(f.scheduler.snapshot().tasks.length, 0);
+  assert.equal(new Store(f.store.file).data.runs[0].output, 'result');
+});
 
 test('daily schedules serialize, survive restart, and keep manual runs separate', async t => {
   const f = fixture(t);
