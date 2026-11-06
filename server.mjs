@@ -5,6 +5,7 @@ import { readFileSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from '
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { CodexClient } from './lib/codex.mjs';
+import { codexRoutes } from './lib/codex-routes.mjs';
 import { Store } from './lib/store.mjs';
 import { Scheduler, validateFolder } from './lib/scheduler.mjs';
 import { CommandProvider } from './lib/providers.mjs';
@@ -170,6 +171,7 @@ const server = http.createServer(async (request, response) => {
     if (!['GET', 'HEAD'].includes(request.method) && (request.headers.origin !== origin || request.headers['x-scheduler-request'] !== '1')) return send(response, 403, { error: '请在本机面板中执行此操作。' });
 
     if (request.method === 'GET' && url.pathname === '/api/state') return send(response, 200, snapshot());
+    if (await codexRoutes(request, response, url, { scheduler, body, send })) return;
     if (await runHistoryRoutes(request,response,url,{store,scheduler,body,send})) return;
     if (url.pathname.startsWith('/api/supervision')) {
       if (await supervisionRoutes(request, response, url, { supervision, body, send })) return;

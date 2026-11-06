@@ -158,6 +158,11 @@ function renderTaskList() {
     const actions = element('div', 'queue-actions');
     actions.setAttribute('role', 'group');
     actions.setAttribute('aria-label', task.title + '的队列操作');
+    const pendingRequest = state.requests.find(request => state.runs.some(run => run.id === request.runId && run.taskId === task.id));
+    if (pendingRequest) {
+      const respond = element('button', 'quiet', '处理确认'); respond.type = 'button';
+      respond.addEventListener('click', () => openRun(pendingRequest.runId)); actions.append(respond);
+    }
     if(!activeStates.has(status) && task.queueStatus?.reason?.includes('文件占用冲突')){
       const resolve=element('button','quiet','处理文件占用');resolve.type='button';
       resolve.addEventListener('click',()=>{workspace.navigate('supervision');window.dispatchEvent(new Event('open-file-leases'));});actions.append(resolve);
@@ -440,9 +445,49 @@ function renderRequests() {
   for (const request of requests) {
     const box = element('div', 'request-box');
     const isQuestion = request.method === 'item/tool/requestUserInput';
-    box.append(element('h3', '', isQuestion ? 'Codex 需要你的回答' : '这一步需要你的确认'));
+    const isMcp = request.method === 'mcpServer/elicitation/request';
+    box.append(element('h3', '', isQuestion ? 'Codex 需要你的回答' : isMcp ? `${request.params.serverName} 需要你的确认` : '这一步需要你的确认'));
     const answerInputs = new Map();
-    if (isQuestion) {
+    let readContent = () => null;
+    if (isMcp) {
+      box.append(element('p', '', request.params.message || '请检查并确认这一步操作。'));
+      if (request.params.mode === 'url') {
+        try {
+          const url = new URL(request.params.url);
+          if (!['https:', 'http:'].includes(url.protocol)) throw new Error();
+          const link = element('a', 'text-link', '打开确认页面'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.append(link);
+        } catch { box.append(element('p', '', '确认链接无效，请交回 Codex 处理。')); }
+      } else {
+        const readers = [];
+        const schema = request.params.requestedSchema;
+        for (const [key, field] of Object.entries(schema?.properties || {})) {
+          const label = element('label', '', field.title || key);
+          const options = field.enum?.map((value, i) => ({ const: value, title: field.enumNames?.[i] || value })) || field.oneOf || field.items?.enum?.map(value => ({ const: value, title: value })) || field.items?.anyOf;
+          const input = element(options || field.type === 'boolean' ? 'select' : 'input');
+          input.required = !!schema.required?.includes(key);
+          if (options) {
+            if (field.type === 'array') input.multiple = true;
+            else input.append(new Option('请选择', ''));
+            for (const option of options) input.append(new Option(option.title || option.const, option.const));
+            if (Array.isArray(field.default)) for (const option of input.options) option.selected = field.default.includes(option.value);
+            else if (field.default !== undefined) input.value = field.default;
+          } else if (field.type === 'boolean') input.append(new Option('请选择', ''), new Option('是', 'true'), new Option('否', 'false'));
+          else {
+            input.type = ['number', 'integer'].includes(field.type) ? 'number' : 'text';
+            if (input.type === 'number') { input.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) input.min = field.minimum; if (field.maximum !== undefined) input.max = field.maximum; }
+            if (field.default !== undefined) input.value = field.default;
+          }
+          readers.push(() => {
+            if (!input.reportValidity()) throw new Error('请完成确认表单。');
+            if (field.type === 'array') return [key, [...input.selectedOptions].map(option => option.value)];
+            if (!input.value && !input.required) return null;
+            return [key, field.type === 'boolean' ? input.value === 'true' : ['number', 'integer'].includes(field.type) ? Number(input.value) : input.value];
+          });
+          label.append(input); if (field.description) label.append(element('span', 'muted', field.description)); box.append(label);
+        }
+        readContent = () => Object.fromEntries(readers.map(read => read()).filter(Boolean));
+      }
+    } else if (isQuestion) {
       for (const question of request.params.questions || []) {
         const label = element('label', '', question.question);
         const input = element('input');
@@ -469,7 +514,7 @@ function renderRequests() {
     accept.addEventListener('click', async () => {
       accept.disabled = true;
       try {
-        const answer = isQuestion ? { answers: Object.fromEntries([...answerInputs].map(([id, input]) => [id, input.value])) } : { decision: 'accept' };
+        const answer = isQuestion ? { answers: Object.fromEntries([...answerInputs].map(([id, input]) => [id, input.value])) } : isMcp ? { decision: 'accept', content: readContent() } : { decision: 'accept' };
         await api(`requests/${request.id}/respond`, 'POST', answer);
         await refreshState();
       } catch (error) { toast(error.message, true); accept.disabled = false; }
@@ -497,7 +542,7 @@ async function refreshRun() {
     $('runTitle').textContent=summary?.taskTitle || '正在加载运行记录';
     $('runProvider').textContent=providerNames[summary?.provider || 'codex'];
     $('runStatus').className='badge '+(summary?.status || 'pending');$('runStatus').textContent=names[summary?.status] || '正在加载';
-    $('runTime').textContent='';$('runOutput').textContent='正在加载运行结果…';$('runLog').textContent='';$('runPrompt').textContent='';$('runError').hidden=true;$('openThread').hidden=true;$('interruptRun').hidden=true;$('copyOutput').disabled=true;renderRequests();
+    $('runTime').textContent='';$('runOutput').textContent='正在加载运行结果…';$('runLog').textContent='';$('runPrompt').textContent='';$('runError').hidden=true;$('openThread').hidden=true;$('handoffCodex').hidden=true;$('codexConnectionNote').hidden=true;$('interruptRun').hidden=true;$('copyOutput').disabled=true;renderRequests();
   }
   const run = await api('runs/' + runId);
   if (runId !== selectedRunId) return;
@@ -516,8 +561,21 @@ async function refreshRun() {
   handleRun.hidden=!!run.deletedAt;deleteRun.hidden=!!run.deletedAt;restoreRun.hidden=!run.deletedAt;
   handleRun.textContent=run.attentionHandledAt?'恢复提醒':'标记已处理';
   historyNote.textContent=!state.historyManagement?'记录管理更新已准备；当前任务结束后重新启动后台即可使用。':run.deletedAt?'已删除，可恢复。':run.attentionHandledAt?'提醒已处理；原始执行结果保留。':'处理提醒不会将待核实结果改为成功，也不会释放文件保护。';
-  $('openThread').hidden = !run.threadId || (run.provider || 'codex') !== 'codex';
+  const codex = !!run.threadId && (run.provider || 'codex') === 'codex';
+  const active = activeStates.has(run.status);
+  $('openThread').hidden = !codex || active || run.status !== 'uncertain' && ['releasing', 'releaseFailed', 'owned'].includes(run.codexThreadState);
   $('openThread').href = run.threadId ? 'codex://threads/' + encodeURIComponent(run.threadId) : '#';
+  $('openThread').textContent = run.status === 'uncertain' ? '在 Codex 中查看并核实' : '在 Codex 中打开对话';
+  $('handoffCodex').hidden = !codex || run.status === 'uncertain' || run.codexThreadState === 'released';
+  $('handoffCodex').disabled = run.codexThreadState === 'releasing' || active && !run.turnId;
+  $('handoffCodex').textContent = active ? '停止并交回 Codex' : run.codexThreadState === 'releasing' ? '正在释放对话…' : '释放对话并交回 Codex';
+  $('codexConnectionNote').hidden = !codex;
+  $('codexConnectionNote').textContent = !codex ? '' : active
+    ? '此对话由调度器执行，回复和确认在本页处理。交回 Codex 会停止本轮并暂停后续预约，保留原对话。'
+    : run.status === 'uncertain' ? '后台连接曾中断，执行结果尚未确认。请在 Codex 查看原对话后决定下一步，不会自动重发。'
+    : run.codexThreadState === 'releaseFailed' ? '对话释放失败：' + run.codexReleaseError
+    : run.codexThreadState === 'releasing' ? '正在释放 Codex 对话连接，完成后可在桌面打开。'
+    : '原对话保存在 Codex；可按任务名称查找。';
   $('interruptRun').hidden = !activeStates.has(run.status) || !run.turnId;
   const output = run.output || run.logs.filter(log => log.type === 'delta').map(log => log.text).join('\n');
   $('runOutput').textContent = output || (activeStates.has(run.status) ? providerNames[run.provider || 'codex'] + ' 正在处理，回复会显示在这里。' : '这次运行没有文本回复。');
@@ -687,6 +745,19 @@ $('duplicateTask').addEventListener('click', async () => {
 });
 $('runSelect').addEventListener('change', () => { selectedRunId = $('runSelect').value || null; requestSignature = ''; renderRunList(); void refreshRun().catch(error => toast(error.message, true)); });
 $('refreshRuns').addEventListener('click', () => refreshState().catch(error => toast(error.message, true)));
+$('handoffCodex').addEventListener('click', async () => {
+  const run = currentRun;
+  if (!run) return;
+  const active = activeStates.has(run.status);
+  if (active && !await confirmAction('停止本轮运行，暂停这个任务的后续预约，并把原对话交回 Codex。已完成的修改与对话记录保留，不会重发消息。', { title: '交回 Codex', accept: '停止并交回', danger: true })) return;
+  $('handoffCodex').disabled = true;
+  try {
+    await api(`runs/${run.id}/handoff-codex`, 'POST', { interrupt: active });
+    await refreshState();
+    toast('对话已释放，点击“在 Codex 中打开对话”继续。');
+  } catch (error) { toast(error.message, true); }
+  finally { if (currentRun?.id === run.id) $('handoffCodex').disabled = false; }
+});
 $('interruptRun').addEventListener('click', async () => {
   if (!await confirmAction('停止当前运行。已完成的文件修改会保留。',{title:'停止运行',accept:'停止运行',danger:true})) return;
   try { await api(`runs/${selectedRunId}/interrupt`, 'POST'); await refreshState(); }
@@ -754,7 +825,7 @@ function renderProviderHelp() {
   $('threadSelectLabel').textContent = id === 'doubaoDesktop' ? '豆包已有对话（客户端已加载）' : '项目中的已有对话';
   const provider = state.providers?.find(provider => provider.id === id);
   const desktop = provider?.capabilities.desktop;
-  $('providerHelp').textContent = id === 'codex' ? '使用 Codex 本地接口，支持已有对话和权限处理。' : `${provider?.detail || '等待后台检测'}。` + (desktop ? '直接发送到桌面会话；权限确认和提问请在原客户端处理。' : '使用独立 CLI 入口，版本和登录可能与桌面端不同。');
+  $('providerHelp').textContent = id === 'codex' ? '由调度器执行 Codex 对话，回复与权限确认在“运行记录”处理。运行结束后释放连接；需要在桌面继续时，点击“停止并交回 Codex”。' : `${provider?.detail || '等待后台检测'}。` + (desktop ? '直接发送到桌面会话；权限确认和提问请在原客户端处理。' : '使用独立 CLI 入口，版本和登录可能与桌面端不同。');
   $('timeoutMinutes').closest('.timeout-field').hidden = id === 'codex';
   $('timeoutMinutes').closest('.timeout-field').querySelector('.field-help').textContent = desktop ? '超过监控时间会暂停接续，保留发送记录；客户端中的任务继续运行。' : '到达上限会停止 CLI 并暂停队列，保留结果供核实。';
   for (const key of ['sandbox', 'approval', 'networkAccess']) $(key).parentElement.hidden = id !== 'codex';

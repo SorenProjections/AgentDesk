@@ -392,7 +392,7 @@ body:has(dialog[open]) { overflow: hidden; }
 .run-heading h2 { font-size: 21px; font-weight: 600; overflow-wrap: anywhere; }
 .run-heading .muted { font-size: 12px; margin-bottom: 7px; }
 .run-time { font-size: 12px; color: var(--muted); white-space: pre-line; line-height: 1.9; margin: 12px 0; }
-.run-links { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 12px; }
+.run-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: center; margin-top: 12px; }
 .text-link { color: var(--accent); font-size: 12px; text-decoration: none; }
 .text-link:hover { text-decoration: underline; }
 .run-empty { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 380px; padding: 25px; max-width: 460px; }
@@ -409,6 +409,8 @@ body:has(dialog[open]) { overflow: hidden; }
 .request-box h3 { font-size: 14px; color: #946b23; margin-bottom: 9px; }
 .request-box pre { max-height: 220px; overflow: auto; font: 12px/1.8 "Cascadia Code", "Microsoft YaHei UI", monospace; }
 .request-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.request-box label { display: grid; gap: 6px; margin-top: 12px; }
+.codex-connection-note { font-size: 12px; line-height: 1.8; margin-top: 12px; overflow-wrap: anywhere; }
 .page-note { display: flex; align-items: flex-start; gap: 12px; padding: 15px 18px; border: 1px solid #e1e9f7; border-radius: 8px; background: #edf3fd; color: #5b7398; font-size: 13px; margin-bottom: 23px; }
 .page-note .icon { margin-top: 1px; }
 .provider-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
