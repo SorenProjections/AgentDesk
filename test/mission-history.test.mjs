@@ -54,3 +54,48 @@ test('supervision history route serves explicit deletion and restore requests',a
   assert.equal(await supervisionRoutes({method:'POST'},{},new URL('http://127.0.0.1/api/supervision/history'),args),true);
   assert.equal(result.status,200);assert.equal(result.data.missions[0].deletedAt,123);
 });
+
+test('deleting finished supervision retires its reservation without reconnecting its client',()=>{
+  for(const status of ['completed','failed']) {
+    const f=fixture(),mission=f.store.data.missions[0],lease=f.store.data.fileLeases[0];
+    lease.runId='past';
+    f.store.data.runs.push({id:'past',missionId:mission.id,status,endedAt:100,output:'original result'});
+    f.supervision.inspect=()=>{throw new Error('Disconnected client must not be required');};
+    updateMissionHistory(f.supervision,[mission.id],'delete');
+    assert.equal(lease.state,'released');
+    assert.equal(f.store.data.runs[0].output,'original result');
+    assert.equal(mission.reviews[0].packet.output,'proof');
+    updateMissionHistory(f.supervision,[mission.id],'restore');
+    assert.equal(mission.state,'paused');
+    assert.equal(lease.state,'released');
+    assert.equal(f.store.data.tasks[0].paused,true);
+  }
+});
+
+test('startup retires legacy deleted reservations only when execution has a confirmed end',()=>{
+  for(const status of ['completed','failed','uncertain','interrupted','running','waiting','dispatching',null]) {
+    const f=fixture(),mission=f.store.data.missions[0],lease=f.store.data.fileLeases[0];
+    mission.deletedAt=100;mission.state='paused';lease.runId='past';
+    if(status)f.store.data.runs.push({id:'past',missionId:mission.id,status,endedAt:100});
+    f.store.save();
+    const reloaded=new Store(f.store.file);
+    new Supervision(reloaded,f.scheduler,{clock:()=>123});
+    assert.equal(reloaded.data.fileLeases[0].state,['completed','failed'].includes(status)?'released':'held',status);
+  }
+});
+
+test('retirement preserves undeleted missions and active execution or collection',()=>{
+  for(const source of ['undeleted','active','job','busy','run','unfinished']) {
+    const f=fixture(),mission=f.store.data.missions[0],lease=f.store.data.fileLeases[0];
+    mission.deletedAt=100;lease.runId='past';
+    f.store.data.runs.push({id:'past',missionId:mission.id,status:'failed',endedAt:100});
+    if(source==='undeleted')delete mission.deletedAt;
+    if(source==='active')f.scheduler.activeRuns.set('live',{task:{missionId:mission.id},run:{}});
+    if(source==='job')f.supervision.jobs.set(mission.id,Promise.resolve());
+    if(source==='busy')f.supervision.busy.add(mission.id);
+    if(source==='run')f.store.data.runs.push({id:'live',missionId:mission.id,status:'running'});
+    if(source==='unfinished')delete f.store.data.runs[0].endedAt;
+    assert.equal(f.supervision.retireDeletedLeases(),0,source);
+    assert.equal(lease.state,'held',source);
+  }
+});

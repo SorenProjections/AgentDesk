@@ -89,6 +89,35 @@ test('a paused ordinary task can be deleted while preserving its execution recor
   assert.equal(new Store(f.store.file).data.runs[0].output, 'result');
 });
 
+test('running ordinary work reports its active state before checking its own file reservation', async t => {
+  const f = fixture(t);
+  new Supervision(f.store, f.scheduler, { clock: f.now });
+  const task = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
+  await f.scheduler.tick();
+  assert.equal(f.scheduler.active.run.status, 'running');
+  assert.equal(f.scheduler.snapshot().tasks[0].queueStatus.status, 'running');
+  assert.doesNotMatch(f.scheduler.readiness(task).reason, /文件占用冲突/);
+  await f.scheduler.tick();
+  assert.equal(f.client.nextTurn, 1);
+  f.client.complete();
+});
+
+test('startup lets a new ordinary conversation run after retiring a deleted failed mission in the same workspace', async t => {
+  const f = fixture(t);
+  const task = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
+  f.store.data.missions = [{ id: 'old', state: 'paused', deletedAt: f.now(), instructions: [], reviews: [] }];
+  f.store.data.fileLeases = [{ id: 'old-lease', owner: 'old', cwd: f.folder, paths: ['research'], resources: [path.join(f.folder, 'research')], access: 'write', provider: 'antigravityDesktop', threadId: 'offline-chat', runId: 'past', state: 'held' }];
+  f.store.data.runs.push({ id: 'past', taskId: 'old-task', fileLeaseOwner: 'old', provider: 'antigravityDesktop', status: 'failed', endedAt: f.now() - 1000 });
+  const supervision = new Supervision(f.store, f.scheduler, { clock: f.now });
+  assert.equal(f.store.data.fileLeases[0].state, 'released');
+  assert.equal(supervision.blocker(task), null);
+  await f.scheduler.tick();
+  assert.equal(f.scheduler.active.task.id, task.id);
+  assert.equal(f.scheduler.active.run.status, 'running');
+  assert.equal(f.client.nextTurn, 1);
+  f.client.complete();
+});
+
 test('daily schedules serialize, survive restart, and keep manual runs separate', async t => {
   const f = fixture(t);
   f.setNow(Date.parse('2026-11-05T08:59:00+08:00'));

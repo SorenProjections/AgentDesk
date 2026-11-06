@@ -25,7 +25,7 @@ function updateSelection(){
   managePicked.disabled=!historyManagement||!picked.size;managePicked.textContent=(showDeleted.checked?'恢复所选':'删除所选')+(picked.size?'（'+picked.size+'）':'');
 }
 async function manageHistory(ids,action){
-  if(!await confirmAction((action==='delete'?'删除':'恢复')+'所选 '+ids.length+' 个督导任务？'+(action==='delete'?'未发送的指令将暂停。项目文件、客户端对话、验收证据和文件保护保留；可在“已删除任务”恢复。':'恢复后不会自动发送暂停的指令。'),{title:action==='delete'?'删除督导任务':'恢复督导任务',accept:action==='delete'?'删除任务':'恢复任务',danger:action==='delete'}))return;
+  if(!await confirmAction((action==='delete'?'删除':'恢复')+'所选 '+ids.length+' 个督导任务？'+(action==='delete'?'未发送的指令将暂停。项目文件、客户端对话和验收证据保留；已结束运行的文件占用会释放，状态不明的占用需核实。可在“已删除任务”恢复。':'恢复后不会自动发送暂停的指令。'),{title:action==='delete'?'删除督导任务':'恢复督导任务',accept:action==='delete'?'删除任务':'恢复任务',danger:action==='delete'}))return;
   await api('supervision/history','POST',{ids,action});picked.clear();selected=null;detailKey='';detail.replaceChildren();await refresh(true);toast(action==='delete'?'督导任务已删除，可在“已删除任务”恢复。':'督导任务已恢复；暂停的指令需要手动恢复。');
 }
 showDeleted.addEventListener('change',()=>{picked.clear();selected=null;detailKey='';detail.replaceChildren();void refresh(true).catch(error=>toast(error.message,true));});
@@ -119,7 +119,7 @@ async function renderDetail(m) {
     element('p', '', '文件夹：' + m.cwd), element('p', '', '会话：' + (m.binding?.threadId || '执行时新建')));
   const management=element('div','supervision-actions');detail.append(management);
   const remove=button(m.deletedAt?'恢复任务':'删除任务',()=>manageHistory([m.id],m.deletedAt?'restore':'delete'),'text-button danger');remove.disabled=!historyManagement||!manageable(m);management.append(remove);
-  if(m.lease)detail.append(element('p','page-note','此任务保留文件保护。删除不会释放占用；可在下方“文件占用与保护范围”核实并释放。'));
+  if(m.lease)detail.append(element('p','page-note','此任务保留文件保护。删除任务后会释放已结束运行的占用；状态不明的运行可在下方“文件占用与保护范围”核实并释放。'));
   if(m.deletedAt){detail.append(element('p','','此任务已删除。恢复后可查看与处理原任务；不会自动发送指令。'));return;}
   detail.append(element('h3', '', '目标'), element('p', '', m.objective), element('h3', '', '约束'));
   const constraints = element('ul');

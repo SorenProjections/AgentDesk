@@ -146,14 +146,21 @@ function renderTaskList() {
     top.append(element('span','badge '+status,names[status]));
     bottom.append(element('span', 'task-date', hasPending(task) ? (task.trigger?.type === 'afterTask' ? '等待 ' + (state.tasks.find(parent => parent.id === task.trigger.taskId)?.title || '前置任务') : task.trigger?.type === 'afterConversation' ? '等待桌面对话' : next ? repeatLabel + shortFormat.format(new Date(next.at)) : '轮到时发送') : '本次任务已结束'));
     content.append(bottom);
-    if (['blocked','editing'].includes(task.queueStatus?.status)) content.append(element('span','task-reason',task.queueStatus.reason));
+    if (!activeStates.has(status) && ['blocked','editing'].includes(task.queueStatus?.status)) {
+      const reason = element('span', 'task-reason', task.queueStatus.reason);
+      reason.title = task.queueStatus.reason;
+      content.append(reason);
+    }
     button.append(element('span','queue-number',String(tasks.indexOf(task)+1).padStart(2,'0')),content);
     button.addEventListener('click', () => loadTask(task));
     const row = element('div', 'queue-row');
     row.append(button);
-    if(task.queueStatus?.reason?.includes('文件占用冲突')){
+    const actions = element('div', 'queue-actions');
+    actions.setAttribute('role', 'group');
+    actions.setAttribute('aria-label', task.title + '的队列操作');
+    if(!activeStates.has(status) && task.queueStatus?.reason?.includes('文件占用冲突')){
       const resolve=element('button','quiet','处理文件占用');resolve.type='button';
-      resolve.addEventListener('click',()=>{workspace.navigate('supervision');window.dispatchEvent(new Event('open-file-leases'));});row.append(resolve);
+      resolve.addEventListener('click',()=>{workspace.navigate('supervision');window.dispatchEvent(new Event('open-file-leases'));});actions.append(resolve);
     }
     if (hasPending(task)) {
       const moves = element('div', 'queue-moves');
@@ -163,7 +170,7 @@ function renderTaskList() {
         move.addEventListener('click', () => reorderTask(task.id, direction));
         moves.append(move);
       }
-      row.append(moves);
+      actions.append(moves);
     }
     const remove = element('button', 'quiet danger queue-delete', '删除');
     remove.type = 'button';
@@ -174,8 +181,9 @@ function renderTaskList() {
       try { await deleteQueueTask(task.id); }
       finally { remove.disabled = false; }
     });
-    row.append(remove);
-    row.title = task.queueStatus?.reason || '';
+    actions.append(remove);
+    row.append(actions);
+    row.title = activeStates.has(status) ? names[status] : task.queueStatus?.reason || '';
     $('taskList').append(row);
   }
 }
@@ -398,7 +406,7 @@ function renderTaskActions() {
   $('saveHint').textContent = editingId === task.id ? '正在编辑，这条消息暂不发送；保存后释放' : task.paused ? '任务已暂停' : '点击“编辑消息”修改尚未发送的内容';
   $('editorTitle').textContent=editingId===task.id?'编辑任务':'任务详情';
   $('taskReadiness').hidden=!task.queueStatus?.reason;
-  $('taskReadiness').textContent=task.queueStatus?.reason || '';
+  $('taskReadiness').textContent=busy ? '当前任务正在执行或等待处理。' : task.queueStatus?.reason || '';
 }
 
 function renderRunOptions() {
@@ -639,7 +647,7 @@ async function deleteQueueTask(id) {
   const task = state.tasks.find(task => task.id === id);
   if (!task) return;
   const message = task.missionId
-    ? '删除“' + task.title + '”所属的督导任务及其全部队列指令。未发送的指令将暂停，运行记录、验收证据和文件保护保留，可在任务督导的“已删除任务”中恢复。'
+    ? '删除“' + task.title + '”所属的督导任务及其全部队列指令。未发送的指令将暂停，运行记录和验收证据保留。已结束运行的文件占用会释放，状态不明的占用需核实；任务可在“已删除任务”中恢复。'
     : '删除“' + task.title + '”及其未来发送时间。已有运行记录会保留。';
   if (!await confirmAction(message,{title:'删除任务',accept:'删除任务',danger:true})) return;
   try {

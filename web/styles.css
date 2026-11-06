@@ -285,23 +285,26 @@ body:has(dialog[open]) { overflow: hidden; }
 .search-input { max-width: 245px; min-height: 35px; padding: 7px 11px; font-size: 12px; }
 .has-editor .search-input { max-width: none; }
 .task-list { display: flex; flex-direction: column; }
-.queue-row { display: flex; align-items: stretch; background: white; border: 1px solid var(--line); border-bottom: 0; position: relative; min-width: 0; }
+.queue-row { display: flex; flex-direction: column; background: white; border: 1px solid var(--line); border-bottom: 0; position: relative; min-width: 0; }
 .queue-row:first-child { border-radius: 10px 10px 0 0; }
 .queue-row:last-child { border-bottom: 1px solid var(--line); border-radius: 0 0 10px 10px; }
 .queue-row:only-child { border-radius: 10px; }
-.task-item { display: flex; align-items: flex-start; gap: 14px; padding: 21px; flex: 1; min-width: 0; text-align: left; background: transparent; color: var(--ink); border-radius: inherit; }
+.task-item { display: flex; align-items: flex-start; gap: 14px; padding: 21px; width: 100%; min-width: 0; text-align: left; background: transparent; color: var(--ink); border-radius: inherit; }
 .task-item:hover { background: #f9fbff; }
-.task-item.selected { background: #edf4ff; box-shadow: inset 3px 0 var(--accent); }
+.queue-row:has(.task-item.selected) { background: #edf4ff; box-shadow: inset 3px 0 var(--accent); }
 .queue-number { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); width: 24px; flex: 0 0 24px; text-align: center; line-height: 25px; background: #f3f6fa; border-radius: 6px; }
 .task-content { display: block; flex: 1; min-width: 0; }
-.task-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.task-name { display: block; font-size: 14px; font-weight: 600; line-height: 1.65; overflow-wrap: anywhere; }
+.task-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.task-name { display: block; min-width: 0; font-size: 14px; font-weight: 600; line-height: 1.65; overflow-wrap: anywhere; }
 .task-folder { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 5px; }
 .task-bottom { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .task-date { font-size: 12px; color: #62738d; }
-.task-reason { display: block; font-size: 11px; color: var(--warning); margin-top: 8px; }
-.queue-moves { display: flex; flex-direction: column; justify-content: center; padding: 8px 8px 8px 0; gap: 3px; }
-.queue-delete { align-self: center; flex-shrink: 0; margin-right: 10px; padding: 6px 8px; }
+.task-reason { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 11px; color: var(--warning); margin-top: 8px; }
+.queue-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 8px 14px; border-top: 1px solid var(--line); }
+.queue-actions > .quiet { min-width: 0; padding: 6px 8px; overflow-wrap: anywhere; }
+.queue-moves { display: flex; align-items: center; margin-left: auto; gap: 3px; }
+.queue-delete { flex-shrink: 0; margin-left: auto; }
+.queue-moves + .queue-delete { margin-left: 0; }
 .queue-moves .quiet { width: 28px; min-height: 28px; padding: 3px; font-size: 15px; }
 .has-editor .task-item { padding: 18px 14px; gap: 10px; }
 .has-editor .task-top { flex-direction: column; gap: 7px; }
@@ -608,7 +611,7 @@ body:has(dialog[open]) { overflow: hidden; }
   .task-name { font-size: 13px; }
   .task-folder, .task-date { font-size: 11px; }
   .queue-number { width: 20px; flex-basis: 20px; }
-  .queue-moves { padding-right: 6px; }
+  .queue-actions { padding: 8px 10px; }
   .editor { padding: 20px 17px 0; }
   .editor-heading h2 { font-size: 19px; }
   .editor-heading .danger { font-size: 11px; padding-inline: 0; }
