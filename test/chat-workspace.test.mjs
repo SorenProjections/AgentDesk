@@ -69,11 +69,13 @@ test('Doubao daily recurrence remains independent of held research leases and wa
   assert.equal(f.store.data.fileLeases.length,0);
 });
 
-test('chat bypass cannot disable file protection for coding tasks or supervised missions',async t => {
+test('ordinary coding shares workspaces while supervised missions retain explicit file protection',async t => {
   const f = fixture(t);
   f.supervisor.leases.acquire({owner:'existing-research',cwd:f.cwd,provider:'workbuddyDesktop',paths:['.'],access:'write'});
   const coding = {id:'coding',provider:'codex',cwd:f.cwd,sandbox:'workspace-write'};
-  assert.match(f.supervisor.blocker(coding),/文件占用冲突/);
+  assert.equal(f.supervisor.blocker(coding),null);
+  f.store.data.missions.push({id:'explicit',state:'scheduled',cwd:f.cwd,access:'write',writePaths:['.'],instructions:[],reviews:[]});
+  assert.match(f.supervisor.blocker({...coding,missionId:'explicit'}),/文件占用冲突/);
   await assert.rejects(f.scheduler.saveTask({...f.draft,provider:'codex'}),/完整的本地文件夹/);
   await assert.rejects(f.supervisor.create({title:'Invalid mission',provider:f.provider.id,cwd:f.cwd}),/可核验会话/);
 });

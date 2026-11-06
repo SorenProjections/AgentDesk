@@ -89,12 +89,13 @@ test('a paused ordinary task can be deleted while preserving its execution recor
   assert.equal(new Store(f.store.file).data.runs[0].output, 'result');
 });
 
-test('running ordinary work reports its active state before checking its own file reservation', async t => {
+test('running ordinary work reports its active state without creating a file reservation', async t => {
   const f = fixture(t);
   new Supervision(f.store, f.scheduler, { clock: f.now });
   const task = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
   await f.scheduler.tick();
   assert.equal(f.scheduler.active.run.status, 'running');
+  assert.equal(f.store.data.fileLeases.length, 0);
   assert.equal(f.scheduler.snapshot().tasks[0].queueStatus.status, 'running');
   assert.doesNotMatch(f.scheduler.readiness(task).reason, /文件占用冲突/);
   await f.scheduler.tick();
@@ -352,15 +353,16 @@ test('corrupt data is preserved and fails loudly rather than silently deleting s
   assert.equal(readFileSync(file, 'utf8'), 'not valid json');
 });
 
-test('queued messages send once, in editable order, without overlapping turns', async t => {
+test('queued messages in the same conversation send once, in editable order, without overlapping turns', async t => {
   const f = fixture(t);
-  const a = await f.scheduler.saveTask({ ...f.draft, title: 'A', trigger: { type: 'queue' }, times: [] });
-  const b = await f.scheduler.saveTask({ ...f.draft, title: 'B', prompt: 'Original', trigger: { type: 'queue' }, times: [] });
+  const a = await f.scheduler.saveTask({ ...f.draft, title: 'A', threadMode: 'existing', threadId: 'local-test-thread', trigger: { type: 'queue' }, times: [] });
+  const b = await f.scheduler.saveTask({ ...f.draft, title: 'B', threadMode: 'existing', threadId: 'local-test-thread', prompt: 'Original', trigger: { type: 'queue' }, times: [] });
   f.scheduler.reorder([b.id, a.id]);
   await f.scheduler.saveTask({ ...b, prompt: 'Edited before sending' }, b.id);
   await Promise.all([f.scheduler.tick(), f.scheduler.tick()]);
   assert.equal(f.store.data.runs[0].taskId, b.id);
   assert.equal(f.store.data.runs[0].prompt, 'Edited before sending');
+  assert.equal(f.store.data.runs.length, 1);
   f.client.complete();
   await f.scheduler.tick();
   assert.equal(f.store.data.runs[1].taskId, a.id);

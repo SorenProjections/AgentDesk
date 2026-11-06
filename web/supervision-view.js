@@ -5,7 +5,7 @@ let selected = null, detailKey = '', listKey = '', leasesKey = '', loading = fal
 const section = $('supervisionPage');
 const list = element('div', 'supervision-list'), detail = element('div', 'supervision-detail');
 const layout = element('div', 'supervision-layout'); layout.append(list, detail);
-const intro = element('p', 'page-note', '保存目标与验收标准，执行完成后检查实际产物。人工或本对话判断通过后，再进入下一阶段。');
+const intro = element('p', 'page-note', '可选的产物验收与纠偏流程。普通定时发送直接使用工作队列；这里的文件范围保护仅协调督导任务。');
 const createButton = element('button', 'primary', '新建督导任务'); createButton.type = 'button';
 const leasesBox = element('details', 'supervision-leases'); leasesBox.append(element('summary', '', '文件占用与保护范围'));
 const leaseList = element('div'); leasesBox.append(leaseList);
@@ -216,7 +216,7 @@ async function refresh(force = false) {
     const nextLeasesKey=JSON.stringify([snapshot.leases,snapshot.missions.map(m=>[m.id,m.title,m.state,m.deletedAt])]);
     if(nextLeasesKey!==leasesKey){
     leasesKey=nextLeasesKey;
-    leaseList.replaceChildren(element('p', '', '占用按任务声明的文件范围判断。共用项目目录或存在其他活动聊天不会锁住整个项目；独立研究使用独立产物目录。不确定的实际占用仍保留，此保护不能禁止手动修改。'));
+    leaseList.replaceChildren(element('p', '', '仅督导任务按声明的文件范围保留占用。普通队列和共用项目目录不会自动产生文件保护；督导占用不会阻挡普通队列任务，此保护不能禁止手动修改。'));
     if(!snapshot.leases.length)leaseList.append(element('p','','没有保留的文件占用。'));
     for (const lease of snapshot.leases) {
       const mission=snapshot.missions.find(row=>row.id===lease.owner);
