@@ -1,6 +1,6 @@
-# 从 Codex 对话调用任务督导 MCP
+# 从对话查询 AgentDesk
 
-MCP 入口是 `mcp/server.mjs`，使用 stdio；Codex 启动并管理 MCP 进程，不需要另开常驻终端，也不需要开放新的网络端口。它通过本机 `ControlClient` 调用已有 AgentDesk 服务，网页、脚本与 MCP 共用任务档案、会话绑定、验收状态和文件占用。
+MCP 入口为 `mcp/server.mjs`，通过本机后台查询客户端、项目、普通任务及运行记录。任务督导、验收、纠偏和文件占用功能已移除。原有历史数据保留，旧督导指令不再派发。
 
 ## 安装与接入
 
@@ -32,49 +32,21 @@ CODEX_SCHEDULER_AUTOSTART = "1"
 
 可复用 [配置模板](../mcp/codex-config.example.toml) 接入其他工作空间；Node 路径、项目路径和端口按实际环境修改。MCP 不需要 OpenAI API 密钥，不会调用额外的语言模型。
 
-## 直接使用自然语言
-
-连接后不必记脚本或工具名称。例如：
-
-> 用 AgentDesk 检查 WorkBuddy 在 F:\AI_Worker 的已有会话。找到我指定的会话后，让它只修改 src/config 和对应测试，修复配置读取。保留现有修改，以回归测试通过和接口兼容为验收标准，最多纠偏两轮。先保存任务，今晚 21:00 开始。
-
-> 查看刚才那个任务的阶段产物、改动文件和测试证据。检查错误处理是否完整；满足标准就验收，否则生成具体纠偏指令，在原会话修正，不扩大范围。
-
-> 用反重力在 E:\my-project 新建只读检查任务，审查设计文档，不修改文件。检查完成后给我验收证据。
-
-需求应明确目录、客户端、目标、约束和验收标准。有多个候选会话时要指定会话编号或可辨认的名称；工具不能替用户猜测已有会话。时间存在歧义时先确认日期，派发工具要求明确时区的 ISO 时间。
-
-研究任务可以共用工作空间 cwd。补充“每次新建唯一研究产物目录，全部产物只写这里，不改已有文件”，管理端应将这个新目录保存为 writePaths。基础骨架、变体由桌面端只读，开始备注和结果追加由管理端处理。其他活动聊天不会因为 cwd 相同而占用整个项目；只有保存的文件范围重叠才冲突，验收也不混入其他研究目录的变化。
-
-服务器初始化 `instructions`、工具描述、`agentdesk://workflow` 资源和 `supervise_task` 提示模板都包含流程要求，让新聊天能够发现并使用工具，无须改写量化研究的常驻规则。
-
-## 工具与流程
+## 当前工具
 
 | 工具 | 用途 |
 | --- | --- |
-| status、list_sessions、list_missions、get_mission | 连接检查、真实会话查询、任务档案 |
-| create_mission、bind_session | 建档、绑定与目录核验；不会派发任务 |
-| dispatch_mission | 真实初始派发，支持 at 预约和 requestId 防重复 |
-| observe_mission、wait_for_mission | 阶段观察与最多 45 秒的状态等待；不运行测试 |
-| get_evidence、refresh_evidence | 读取验收包；后者重跑保存的验收命令 |
-| review_mission、correct_mission | 对最新证据作语义判断、有限轮次纠偏 |
-| pause_mission、resume_mission、interrupt_run、release_lease | 暂停、恢复、中断和核验后释放占用 |
+| status | 客户端连接、普通任务与正在执行的运行 |
+| list_projects | Codex 或豆包客户端项目 |
+| list_sessions | 按客户端、工作目录及项目筛选真实会话，支持分页 |
+| list_workbuddy_experts | 只读查询 WorkBuddy 团队与专家目录 |
+| get_run | 运行回复、错误及日志 |
+| interrupt_run | 经用户授权后停止指定运行 |
 
-通常流程：检查连接与会话 → 保存目标/约束/标准 → 绑定 → 派发或预约 → 观察 → 读取验收证据 → 判断人工标准 → 接受或纠偏。初始派发与每轮纠偏提供不同且稳定的 `requestId`，结果不明时先查询指令记录。失败测试不能通过人工结论覆盖。更详细的档案输入和恢复规则见 [任务督导指南](supervision.md)。
+创建与安排普通任务请使用面板，或 `node scripts/agentdesk.mjs create --file task.json`。JSON 格式与 `/api/tasks` 相同；保存后会按发送条件执行。WorkBuddy 普通任务可选 `desktopExpertId`，省略沿用客户端默认配置。
 
-## 持续运行与边界
+Codex 项目从 `project/list` 读取，保存真实项目 ID；新对话通过 `thread/start.projectId` 设置归属，已有未归属对话通过 `thread/metadata/update` 修复。只填目录时按最深匹配根目录选择；多个同级项目需要明确选择。启动时仅修复本面板已有任务所创建、空闲且未归属项目的对话，不移动已分配项目的对话。
 
-MCP 让当前对话调用工具，本身不会自动唤醒已经结束的聊天。预约执行、客观验收和已启用的有限纠偏由后台完成；如果需要我每隔一段时间判断内容、引导方向，要再安排当前聊天的 heartbeat。用户给出监控要求和频率后，由当前对话的自动化工具建立，状态无变化时保持安静。
+## 验证
 
-电脑、后台、客户端和桌面桥需要可用。会话回复、文件和日志都是证据，不能改变授权。文件占用只约束经调度器安排的任务，不能阻止绕过调度器的手动编辑。不会因为安装 MCP 就自动向客户端发送任务。
-
-## 验证与开发
-
-```powershell
-npm --prefix E:\CodexScheduler\mcp test
-node E:\CodexScheduler\mcp\verify.mjs
-```
-
-测试使用模拟接口，核验协议握手、工具参数、路由、恢复和自动启动边界。`verify.mjs` 启动真正的 stdio MCP 进程，只查询状态和档案，不建档、不派发，要求已有后台可用。根目录 `npm test` 仍不依赖 MCP 子包；安装 MCP 后也可用根目录 `npm run test:mcp`。
-
-MCP 当前使用 SDK v1 维护分支兼容的 MCP 协议，版本固定在子包锁文件中；升级 SDK 时需一起验证实际客户端握手和工具调用，不能只替换依赖版本。
+运行 `npm run test:mcp` 检查 MCP 协议、参数与后端连接边界；`node mcp/verify.mjs` 只查询已启动后台的状态，不派发任务。更换版本后重启 MCP 连接以更新工具目录。

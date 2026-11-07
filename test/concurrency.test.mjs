@@ -5,7 +5,6 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import { Store } from '../lib/store.mjs';
 import { Scheduler } from '../lib/scheduler.mjs';
-import { Supervision } from '../lib/supervision.mjs';
 import { WorkBuddyDesktop, AntigravityDesktop } from '../lib/desktop.mjs';
 
 class Client extends EventEmitter {
@@ -39,30 +38,6 @@ function desktop(id) {
       return { completion, async interrupt() { job.interrupted = true; finish({ status: 'interrupted' }); } };
     } };
 }
-
-test('isolated WorkBuddy and Antigravity missions run together; overlapping writes wait', async t => {
-  const f = fixture(t), wb = desktop('workbuddyDesktop'), ag = desktop('antigravityDesktop');
-  f.scheduler.providers.set(wb.id, wb); f.scheduler.providers.set(ag.id, ag);
-  const supervisor = new Supervision(f.store, f.scheduler); t.after(() => supervisor.close());
-  for (const [provider, scope] of [[wb.id, 'research/a'], [ag.id, 'research/b'], [ag.id, 'research/a/nested']]) {
-    const m = await supervisor.create({ title: scope, objective: 'Isolated research', cwd: f.cwd, provider,
-      constraints: ['Only own scope'], criteria: [{ id: 'manual', type: 'manual', description: 'Review' }], writePaths: [scope] });
-    await supervisor.dispatch(m.id, { requestId: 'start-' + m.id });
-  }
-  await Promise.all([f.scheduler.tick(), f.scheduler.tick()]);
-  assert.equal(f.scheduler.activeRuns.size, 2);
-  assert.equal(wb.jobs.length, 1); assert.equal(ag.jobs.length, 1);
-  assert.equal(f.store.data.runs.length, 2);
-  assert.match(f.scheduler.readiness(f.store.data.tasks[2]).reason, /占用冲突/);
-  ag.jobs[0].hooks.output('B output');
-  assert.equal(wb.jobs[0].run.output, '');
-  await f.scheduler.interrupt(ag.jobs[0].run.id); await new Promise(r => setImmediate(r));
-  assert.equal(ag.jobs[0].interrupted, true); assert.equal(wb.jobs[0].interrupted, false);
-  assert.equal(f.scheduler.activeRuns.size, 1); assert.equal(wb.jobs[0].run.status, 'running');
-  assert.deepEqual(f.scheduler.snapshot().activeRunIds, [wb.jobs[0].run.id]);
-  await assert.rejects(supervisor.releaseLease(f.store.data.fileLeases.find(l => l.owner === f.store.data.tasks[0].missionId).id,
-    { confirmedIdle: true, reason: 'Cannot release an active parallel owner' }), /运行/);
-});
 
 test('parallel Codex requests, output, completion and interruption route to their own turns', async t => {
   const f = fixture(t);
@@ -119,21 +94,18 @@ test('backend reload recovers an acknowledged WorkBuddy request without sending 
   const runId = 'original-request'; let resumeReads = 0;
   p.inspect = async () => { resumeReads++; return { cwd: f.cwd, status: 'working', requests: [{ id: runId, state: 'working' }], last: { id: runId } }; };
   p.invoke = async () => { throw new Error('No send/create/cancel expected'); };
-  const task = { ...f.draft, id: 'task-original', provider: p.id, threadId: 'wb-existing', timeoutMinutes: 5, trigger: { type: 'queue', id: 'slot-original', state: 'running' }, missionId: 'mission-original' };
-  const run = { id: runId, taskId: task.id, slotId: task.trigger.id, provider: p.id, threadId: task.threadId, startedAt: Date.now(), status: 'running', logs: [{ text: '消息已发送到 WorkBuddy 桌面对话。' }], fileLeaseOwner: task.missionId };
+  const task = { ...f.draft, id: 'task-original', provider: p.id, threadId: 'wb-existing', timeoutMinutes: 5, trigger: { type: 'queue', id: 'slot-original', state: 'running' } };
+  const run = { id: runId, taskId: task.id, slotId: task.trigger.id, provider: p.id, threadId: task.threadId, startedAt: Date.now(), status: 'running', logs: [{ text: '消息已发送到 WorkBuddy 桌面对话。' }] };
   f.store.data.tasks.push(task); f.store.data.runs.push(run);
-  f.store.data.missions = [{ id: task.missionId, state: 'running', latestRunId: runId, instructions: [], writePaths: ['research/original'], cwd: f.cwd }]; f.store.save();
+  f.store.save();
   // Leave the recovered request waiting rather than spin a fake polling loop.
   p.pause = () => new Promise(() => {});
   const recovered = new Scheduler(new Store(f.store.file), new Client(), { providers: new Map([[p.id, p]]) }); t.after(() => recovered.stop());
-  const supervisor = new Supervision(recovered.store, recovered); t.after(() => supervisor.close());
-  assert.equal(supervisor.get(task.missionId).state, 'running');
   assert.equal(recovered.activeRuns.get(runId).recoveryPending, true);
   await recovered.tick();
   assert.equal(resumeReads, 1); assert.equal(recovered.store.data.runs.length, 1);
   assert.equal(recovered.activeRuns.get(runId).run.status, 'running');
   assert.equal(recovered.store.data.settings.queuePaused, false);
-  assert.equal(supervisor.get(task.missionId).latestRunId, runId);
 });
 
 test('desktop recovery refuses missing acknowledgements or a different turn', async () => {
@@ -161,25 +133,6 @@ test('Antigravity recovery uses stable input cursor when its timestamp settles a
   ag.inspect = async () => ({ cwd: process.cwd(), version: 'initial-timestamp', status: 'running', steps: 7,
     summary: { lastUserInputStepIndex: 6 } });
   assert.equal((await ag.resume({ cwd: process.cwd() }, run, {}).completion).status, 'uncertain');
-});
-
-test('explicit monitor recovery keeps the original run, instruction and lease and never resends', async t => {
-  const f = fixture(t), p = desktop('antigravityDesktop'); f.scheduler.providers.set(p.id, p);
-  const supervisor = new Supervision(f.store, f.scheduler); t.after(() => supervisor.close());
-  const m = await supervisor.create({ title: 'Background research', objective: 'Finish research', cwd: f.cwd, provider: p.id,
-    constraints: ['Only isolated scope'], criteria: [{ id: 'review', type: 'manual', description: 'Review' }], writePaths: ['research/background'] });
-  await supervisor.dispatch(m.id, { requestId: 'one-start' }); await f.scheduler.tick();
-  const run = f.store.data.runs[0], lease = f.store.data.fileLeases[0];
-  p.jobs[0].finish({ status: 'uncertain', error: 'Desktop summary idle with a pending command' });
-  await new Promise(r => setImmediate(r));
-  assert.equal(supervisor.get(m.id).state, 'uncertain'); assert.equal(lease.state, 'held');
-  p.canResume = () => true; p.recoveryState = async () => 'running';
-  let resumes = 0; p.resume = () => { resumes++; return { completion: new Promise(() => {}), interrupt: async () => {} }; };
-  await Promise.all([f.scheduler.resumeDesktopMonitor(run.id), f.scheduler.resumeDesktopMonitor(run.id)]);
-  assert.equal(resumes, 1); assert.equal(p.jobs.length, 1); assert.equal(f.store.data.runs.length, 1);
-  assert.equal(run.status, 'running'); assert.equal(supervisor.get(m.id).state, 'running'); assert.equal(lease.runId, run.id);
-  assert.equal(supervisor.get(m.id).instructions[0].runId, run.id); assert.equal(supervisor.get(m.id).instructions[0].state, 'running');
-  assert.equal(f.store.data.settings.queuePaused, true); // Recovering a run does not silently resume the global queue.
 });
 
 test('Antigravity background steps keep monitoring even when its summary is idle', async () => {

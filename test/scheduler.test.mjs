@@ -6,8 +6,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../lib/store.mjs';
 import { Scheduler } from '../lib/scheduler.mjs';
-import { Supervision } from '../lib/supervision.mjs';
-import { updateMissionHistory } from '../lib/mission-history.mjs';
 
 const scratch = path.resolve(process.env.CODEX_SCHEDULER_TEST_DATA || path.join(path.dirname(fileURLToPath(import.meta.url)), '../work/scheduler-tests'));
 mkdirSync(scratch, { recursive: true });
@@ -17,9 +15,10 @@ class FakeCodex extends EventEmitter {
   async connect() { return this; }
   async request(method, params) {
     this.calls.push({ method, params });
-    if (method === 'thread/start') return { thread: { id: 'local-test-thread', cwd: params.cwd, status: { type: 'idle' } } };
+    if (method === 'thread/start') return { thread: { id: 'local-test-thread' + (this.nextTurn ? '-' + this.nextTurn : ''), cwd: params.cwd, status: { type: 'idle' } } };
     if (method === 'thread/read' || method === 'thread/resume') return { thread: { id: params.threadId, name: 'Existing test', cwd: this.folder, status: { type: 'idle' } } };
     if (method === 'turn/start') {
+      this.lastThreadId = params.threadId;
       if (this.failSend) {
         const error = new Error('Transport interrupted after write');
         error.uncertainDelivery = true;
@@ -33,7 +32,7 @@ class FakeCodex extends EventEmitter {
   }
   respond(id, result) { this.reply.push({ id, result }); }
   rejectRequest(id, message) { this.reply.push({ id, error: message }); }
-  complete(threadId = 'local-test-thread', status = 'completed') {
+  complete(threadId = this.lastThreadId || 'local-test-thread', status = 'completed') {
     this.emit('notification', { method: 'item/completed', params: { threadId, turnId: 'turn-' + this.nextTurn, item: { type: 'agentMessage', text: 'Done' } } });
     this.emit('notification', { method: 'turn/completed', params: { threadId, turn: { id: 'turn-' + this.nextTurn, status } } });
   }
@@ -51,34 +50,6 @@ function fixture(t) {
     draft: { title: 'One shot', cwd: folder, threadMode: 'new', prompt: 'Run this once', times: [now + 10000] } };
 }
 
-test('deleting a mission removes all its instructions from the queue and restoring keeps them paused', async t => {
-  const f = fixture(t);
-  const supervision = new Supervision(f.store, f.scheduler, { clock: f.now });
-  const first = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
-  const correction = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
-  const ordinary = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
-  first.missionId = correction.missionId = 'old';
-  first.trigger.state = 'completed';
-  f.store.data.missions.push({ id: 'old', title: 'Old mission', state: 'scheduled', instructions: [{ taskId: first.id }, { taskId: correction.id }], reviews: [{ id: 'proof', packet: { output: 'evidence' } }] });
-  f.store.data.runs.push({ id: 'past', taskId: first.id, missionId: 'old', status: 'completed', output: 'result' });
-  f.store.data.fileLeases.push({ id: 'lease', owner: 'old', state: 'held' });
-  updateMissionHistory(supervision, ['old'], 'delete');
-  assert.deepEqual(f.scheduler.snapshot().tasks.map(task => task.id), [ordinary.id]);
-  assert.equal(f.scheduler.snapshot().runs[0].id, 'past');
-  assert.equal(f.store.data.tasks.length, 3);
-  assert.equal(f.store.data.missions[0].reviews[0].packet.output, 'evidence');
-  assert.equal(f.store.data.fileLeases[0].state, 'held');
-  assert.doesNotThrow(() => f.scheduler.reorder([ordinary.id]));
-  const restarted = new Scheduler(new Store(f.store.file), f.client, { clock: f.now });
-  t.after(() => restarted.stop());
-  assert.deepEqual(restarted.snapshot().tasks.map(task => task.id), [ordinary.id]);
-  updateMissionHistory(supervision, ['old'], 'restore');
-  assert.equal(f.scheduler.snapshot().tasks.length, 3);
-  assert.equal(first.paused, true);
-  assert.equal(correction.paused, true);
-  assert.equal(ordinary.paused, false);
-});
-
 test('a paused ordinary task can be deleted while preserving its execution records', async t => {
   const f = fixture(t);
   const task = await f.scheduler.saveTask(f.draft);
@@ -91,30 +62,13 @@ test('a paused ordinary task can be deleted while preserving its execution recor
 
 test('running ordinary work reports its active state without creating a file reservation', async t => {
   const f = fixture(t);
-  new Supervision(f.store, f.scheduler, { clock: f.now });
   const task = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
   await f.scheduler.tick();
   assert.equal(f.scheduler.active.run.status, 'running');
-  assert.equal(f.store.data.fileLeases.length, 0);
+  assert.equal((f.store.data.fileLeases || []).length, 0);
   assert.equal(f.scheduler.snapshot().tasks[0].queueStatus.status, 'running');
   assert.doesNotMatch(f.scheduler.readiness(task).reason, /文件占用冲突/);
   await f.scheduler.tick();
-  assert.equal(f.client.nextTurn, 1);
-  f.client.complete();
-});
-
-test('startup lets a new ordinary conversation run after retiring a deleted failed mission in the same workspace', async t => {
-  const f = fixture(t);
-  const task = await f.scheduler.saveTask({ ...f.draft, trigger: { type: 'queue' }, times: [] });
-  f.store.data.missions = [{ id: 'old', state: 'paused', deletedAt: f.now(), instructions: [], reviews: [] }];
-  f.store.data.fileLeases = [{ id: 'old-lease', owner: 'old', cwd: f.folder, paths: ['research'], resources: [path.join(f.folder, 'research')], access: 'write', provider: 'antigravityDesktop', threadId: 'offline-chat', runId: 'past', state: 'held' }];
-  f.store.data.runs.push({ id: 'past', taskId: 'old-task', fileLeaseOwner: 'old', provider: 'antigravityDesktop', status: 'failed', endedAt: f.now() - 1000 });
-  const supervision = new Supervision(f.store, f.scheduler, { clock: f.now });
-  assert.equal(f.store.data.fileLeases[0].state, 'released');
-  assert.equal(supervision.blocker(task), null);
-  await f.scheduler.tick();
-  assert.equal(f.scheduler.active.task.id, task.id);
-  assert.equal(f.scheduler.active.run.status, 'running');
   assert.equal(f.client.nextTurn, 1);
   f.client.complete();
 });
@@ -147,6 +101,8 @@ test('daily schedules serialize, survive restart, and keep manual runs separate'
   f.setNow(first + 2 * 86400000);
   await restarted.tick();
   assert.equal(f.client.nextTurn, 4);
+  assert.equal(f.client.calls.filter(call=>call.method==='thread/start').length,4);
+  assert.equal(new Set(restarted.store.data.runs.map(run=>run.threadId)).size,4);
   assert.equal(restarted.getTask(task.id).times.filter(slot => slot.state === 'pending').length, 1);
   f.client.complete();
 });
@@ -223,7 +179,7 @@ test('one-shot time creates one turn and never fires again after completion or r
   assert.equal(f.client.calls.filter(call => call.method === 'turn/start').length, 1);
 });
 
-test('separate dates keep the same newly created conversation and serialize runs', async t => {
+test('separate dates create independent conversations and serialize runs', async t => {
   const f = fixture(t);
   const task = await f.scheduler.saveTask({ ...f.draft, times: [f.now() + 10000, f.now() + 20000] });
   f.setNow(f.now() + 30000);
@@ -233,8 +189,10 @@ test('separate dates keep the same newly created conversation and serialize runs
   f.client.complete();
   await f.scheduler.tick();
   assert.equal(f.client.nextTurn, 2);
-  assert.equal(f.client.calls.filter(call => call.method === 'thread/start').length, 1);
-  assert.equal(task.threadId, 'local-test-thread');
+  assert.equal(f.client.calls.filter(call => call.method === 'thread/start').length, 2);
+  assert.equal(f.client.calls.some(call => call.method === 'thread/resume'), false);
+  assert.notEqual(f.store.data.runs[0].threadId, f.store.data.runs[1].threadId);
+  assert.equal(task.threadId, f.store.data.runs[1].threadId);
   f.client.complete();
 });
 

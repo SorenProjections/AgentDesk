@@ -5,6 +5,7 @@ import { readFileSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from '
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { CodexClient } from './lib/codex.mjs';
+import { CodexDesktop } from './lib/codex-desktop.mjs';
 import { codexRoutes } from './lib/codex-routes.mjs';
 import { Store } from './lib/store.mjs';
 import { Scheduler, validateFolder } from './lib/scheduler.mjs';
@@ -15,9 +16,8 @@ import { SystemIntegration } from './lib/system.mjs';
 import { NativeCodexObserver } from './lib/native-codex.mjs';
 import { NativeWorkBuddyObserver } from './lib/native-workbuddy.mjs';
 import { SessionHub } from './lib/sessions.mjs';
-import { Supervision } from './lib/supervision.mjs';
-import { supervisionRoutes } from './lib/supervision-routes.mjs';
 import { runHistoryRoutes } from './lib/run-history.mjs';
+import { desktopExpertRoutes } from './lib/desktop-expert-routes.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.CODEX_SCHEDULER_PORT || 43127);
@@ -45,7 +45,8 @@ for (const provider of [new AntigravityDesktop(), new WorkBuddyDesktop(), new Do
   provider.verification = store.data.settings.providers?.[provider.id]?.verification || null;
   providers.set(provider.id, provider);
 }
-const scheduler = new Scheduler(store, client, { providers });
+const codexDesktop = new CodexDesktop();
+const scheduler = new Scheduler(store, client, { providers, codexDesktop });
 const system = new SystemIntegration(root);
 system.on('change', () => scheduler.emit('change'));
 const nativeCodex = new NativeCodexObserver();
@@ -66,9 +67,7 @@ const sessions = new SessionHub(store, { sources: [
     } };return source;
   }),
 ], notifier: (title, detail) => system.notify(title, detail, origin + '/#sessions') });
-const supervision = new Supervision(store, scheduler, { sessionRows: () => sessions.snapshot().sessions });
-supervision.on('change', () => scheduler.emit('change'));
-const snapshot = () => ({ ...scheduler.snapshot(), historyManagement:2, system: system.snapshot(), sessionHub: sessions.snapshot(), supervision: supervision.snapshot() });
+const snapshot = () => ({ ...scheduler.snapshot(), historyManagement:2, system: system.snapshot(), sessionHub: sessions.snapshot() });
 let shuttingDown = false;
 let pickingFolder = false;
 
@@ -141,8 +140,6 @@ const assets = {
   '/workspace.js': ['workspace.js', 'text/javascript; charset=utf-8'],
   '/providers-view.js': ['providers-view.js', 'text/javascript; charset=utf-8'],
   '/sessions-view.js': ['sessions-view.js', 'text/javascript; charset=utf-8'],
-  '/supervision-view.js': ['supervision-view.js', 'text/javascript; charset=utf-8'],
-  '/supervision.css': ['supervision.css', 'text/css; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
   '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
   '/agentdesk.png': ['agentdesk.png', 'image/png'],
@@ -173,9 +170,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/state') return send(response, 200, snapshot());
     if (await codexRoutes(request, response, url, { scheduler, body, send })) return;
     if (await runHistoryRoutes(request,response,url,{store,scheduler,body,send})) return;
-    if (url.pathname.startsWith('/api/supervision')) {
-      if (await supervisionRoutes(request, response, url, { supervision, body, send })) return;
-    }
+    if (await desktopExpertRoutes(request, response, url, { providers, send })) return;
     if (request.method === 'POST' && url.pathname === '/api/sessions/sync') { await sessions.refresh(); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/sessions/settings') { sessions.configure(await body(request)); return send(response, 200, snapshot()); }
     if (request.method === 'POST' && url.pathname === '/api/notifications/test') {
@@ -242,7 +237,16 @@ const server = http.createServer(async (request, response) => {
       request.on('close', () => { clearInterval(heartbeat); clients.delete(response); });
       return;
     }
+    if (request.method === 'GET' && url.pathname === '/api/models') {
+      const models = []; let cursor;
+      do {
+        const page = await client.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
+        models.push(...(page.data || [])); cursor = page.nextCursor;
+      } while (cursor && models.length < 500);
+      return send(response, 200, { models });
+    }
     if (request.method === 'GET' && url.pathname === '/api/projects') {
+      if (url.searchParams.get('provider') === 'codex') return send(response, 200, { projects: await codexDesktop.listProjects() });
       const provider = providers.get(url.searchParams.get('provider'));
       if (!provider?.listProjects) throw new Error('这个 Agent 不提供客户端项目列表。');
       return send(response, 200, {projects:await provider.listProjects()});
@@ -266,10 +270,10 @@ const server = http.createServer(async (request, response) => {
         return send(response, 200, { threads, nextCursor: null });
       }
       const folder = url.searchParams.get('cwd');
-      const result = await client.listThreads({ cwd: folder ? validateFolder(folder) : undefined, cursor: url.searchParams.get('cursor'), searchTerm: url.searchParams.get('search') });
+      const result = await codexDesktop.listThreads({ cwd: folder ? validateFolder(folder) : undefined, projectId: url.searchParams.get('projectId'), cursor: url.searchParams.get('cursor'), searchTerm: url.searchParams.get('search') });
       const threads = (result.data || []).map(thread => ({
         id: thread.id, name: thread.name || thread.preview?.slice(0, 100) || '未命名对话', cwd: thread.cwd,
-        updatedAt: thread.updatedAt, status: thread.status?.type || 'notLoaded',
+        updatedAt: thread.updatedAt, projectId: thread.projectId, status: thread.status?.type || 'notLoaded',
       }));
       return send(response, 200, { threads, nextCursor: result.nextCursor || null });
     }
@@ -279,7 +283,8 @@ const server = http.createServer(async (request, response) => {
       return run ? send(response, 200, run) : send(response, 404, { error: '运行记录不存在。' });
     }
     if (request.method === 'POST' && url.pathname === '/api/connect') {
-      await client.connect();
+      await codexDesktop.probe();
+      scheduler.emit('change');
       return send(response, 200, snapshot());
     }
     if (request.method === 'POST' && url.pathname === '/api/folders/pick') return send(response, 200, await chooseFolder((await body(request)).cwd || ''));
@@ -314,7 +319,6 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/shutdown') {
       if (scheduler.maintenance) return send(response, 409, { error: 'Agent 正在验证接入，请等待验证结束再停止后台。' });
       if (scheduler.active) return send(response, 409, { error: '有任务正在运行，请先停止运行，再关闭后台。' });
-      if (supervision.jobs.size) return send(response, 409, { error: '正在收集验收证据，请等待结束后再关闭后台。' });
       send(response, 200, { ok: true });
       void shutdown();
       return;
@@ -330,11 +334,11 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   scheduler.stop();
-  await supervision.close();
   sessions.close();
   nativeWorkBuddy.close();
   system.close();
   for (const provider of providers.values()) provider.close?.();
+  codexDesktop.close();
   client.close();
   for (const response of clients) response.end();
   server.close();
@@ -351,7 +355,7 @@ server.listen(port, '127.0.0.1', () => {
   void system.inspect().then(() => scheduler.emit('change'));
   system.setAwake(store.data.settings.keepAwake);
   for (const provider of providers.values()) void provider.probe().then(() => scheduler.emit('change'));
-  client.connect().catch(error => { console.error(error.message); scheduler.emit('change'); });
+  void codexDesktop.probe().then(() => scheduler.emit('change'));
 });
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

@@ -44,6 +44,12 @@ test('Doubao creates in the selected native project and captures the saved conve
   assert.equal(mismatch.sends,0);
 });
 
+test('Doubao new mode ignores the previous run conversation saved on the task', async () => {
+  const f=fixture();
+  assert.equal((await f.start({threadId:'old-chat'}).completion).status,'completed');
+  assert.deepEqual(f.created,{projectId:null});assert.equal(f.opened,undefined);
+});
+
 test('Doubao waits for the new turn, finished controls and stable text even when send is disabled', async () => {
   const f = fixture();
   assert.equal((await f.start().completion).status, 'completed');

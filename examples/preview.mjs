@@ -3,9 +3,10 @@ import http from 'node:http';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { nextOccurrence } from '../lib/recurrence.mjs';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const names = { codex: 'Codex', antigravityDesktop: 'Antigravity', workbuddyDesktop: 'WorkBuddy', antigravity: 'Antigravity CLI', workbuddy: 'WorkBuddy CLI' };
+const names = { codex: 'Codex', doubaoDesktop: '豆包', antigravityDesktop: 'Antigravity', workbuddyDesktop: 'WorkBuddy', antigravity: 'Antigravity CLI', workbuddy: 'WorkBuddy CLI' };
 export function fixture() {
   const now = Date.now();
   const specs = [
@@ -34,8 +35,6 @@ export function fixture() {
 
 export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}) {
   let state = fixture();
-  state.supervision = { missions: [], leases: [], collecting: 0 };
-  const demoMissions = [];
   const clients = new Set();
   const send = (res, value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
   const updateCounts = () => {
@@ -57,13 +56,10 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
       if (req.method !== 'GET') { let raw = ''; for await (const chunk of req) raw += chunk; if (raw) input = JSON.parse(raw); }
       if (route === '/__preview/reset') { state = fixture(); return send(res, { ok: true }); }
       if (route === '/__preview/state' && req.method === 'POST') { Object.assign(state, input); updateCounts(); for (const client of clients) client.write('event: change\ndata: {}\n\n'); return send(res, state); }
-      if (route === '/api/state') { updateCounts(); return send(res, state); }
-      if (route === '/api/supervision') return send(res, { ...state.supervision, missions: demoMissions });
-      if (route === '/api/supervision/missions' && req.method === 'POST') {
-        const mission = { ...input, id: 'demo-supervision-' + demoMissions.length, state: 'draft', binding: null, instructions: [], reviews: [], corrections: 0, maxCorrections: input.maxCorrections ?? 2 };
-        demoMissions.push(mission); return send(res, mission, 201);
-      }
-      if (/^\/api\/supervision\/missions\/[a-zA-Z0-9-]+$/.test(route) && req.method === 'GET') return send(res, demoMissions.find(m => m.id === route.split('/').at(-1)) || {});
+      if (route === '/api/state') { updateCounts(); return send(res, {...state,scheduledTasksVersion:1}); }
+      if (route === '/api/models') return send(res, {models:[{model:'demo-model',displayName:'演示模型'}]});
+      if (route === '/api/projects') return send(res, {projects:[{id:'demo-project',name:'AgentDesk',rootPaths:['E:\\AgentDesk']}]});
+      if (route === '/api/folders/validate') return send(res, {cwd:input.cwd});
       if (route === '/api/threads') return send(res, { threads: state.sessionHub.sessions.map(s => ({ id: s.nativeId, name: s.name, cwd: s.cwd, status: s.status })) });
       if (route.startsWith('/api/runs/')) return send(res, state.runs.find(r => r.id === route.split('/').at(-1)));
       if (route === '/api/sessions/sync') { state.sessionHub.lastSyncAt = Date.now(); return send(res, {}); }
@@ -78,11 +74,12 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
         if (action) { if (action === 'pause' || action === 'resume') task.paused = action === 'pause'; return send(res, task); }
         if (req.method === 'DELETE') { state.tasks = state.tasks.filter(t => t.id !== id); return send(res, {}); }
         if (!task) { task = { id: 'task-demo-' + state.tasks.length, createdAt: Date.now(), order: state.tasks.length, revision: 1, paused: true, queueStatus: { status: 'paused' } }; state.tasks.push(task); }
-        Object.assign(task, input, { times: input.times.map(at => ({ at, state: 'pending' })), trigger: { ...input.trigger, state: 'pending' }, revision: task.revision + 1 }); return send(res, task);
+        const times=input.trigger?.recurrence?[nextOccurrence(input.trigger.recurrence,Date.now())]:input.times;
+        Object.assign(task, input, { times: times.map(at => ({ at, state: 'pending' })), trigger: { ...input.trigger, state: 'pending' }, revision: task.revision + 1 }); return send(res, task);
       }
       if (route.startsWith('/api/')) return send(res, { error: '演示模式：此操作不会连接客户端或发送任务。' }, 400);
       const file = route === '/' ? 'index.html' : route.slice(1);
-      if (!['index.html', 'styles.css', 'supervision.css', 'supervision-view.js', 'app.js', 'api.js', 'workspace.js', 'providers-view.js', 'sessions-view.js', 'favicon.svg'].includes(file)) return send(res, {}, 404);
+      if (!['index.html', 'styles.css', 'app.js', 'api.js', 'workspace.js', 'providers-view.js', 'sessions-view.js', 'favicon.svg'].includes(file)) return send(res, {}, 404);
       let content = readFileSync(path.join(webRoot, file), 'utf8');
       if (file === 'index.html') content = content.replace('</body>', '<div style="position:fixed;bottom:8px;left:8px;z-index:100;font:11px/1.5 sans-serif;padding:5px 9px;border:1px solid #ccd6e5;border-radius:6px;background:#fff;color:#53637b;pointer-events:none">界面预览 · 演示数据</div></body>');
       const types = { html: 'text/html', css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml' };

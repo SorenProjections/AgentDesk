@@ -5,10 +5,9 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import { Store } from '../lib/store.mjs';
 import { Scheduler } from '../lib/scheduler.mjs';
-import { Supervision } from '../lib/supervision.mjs';
 import { DoubaoDesktop } from '../lib/doubao-desktop.mjs';
 
-function fixture(t, supervised = true) {
+function fixture(t) {
   const root = path.resolve('work/chat-workspace-tests'); mkdirSync(root, {recursive:true});
   const cwd = mkdtempSync(path.join(root,'case-'));
   const store = new Store(path.join(cwd,'tasks.json'));
@@ -24,18 +23,16 @@ function fixture(t, supervised = true) {
   };
   let now = Date.parse('2026-11-05T08:00:00+08:00');
   const scheduler = new Scheduler(store,client,{providers:new Map([[provider.id,provider]]),clock:()=>now});
-  const supervisor = supervised ? new Supervision(store,scheduler) : null;
   t.after(async () => {
     jobs.forEach(job => job.finish({status:'completed'}));
     await new Promise(resolve => setImmediate(resolve));
-    scheduler.stop(); await supervisor?.close();
+    scheduler.stop();
   });
-  return {cwd,store,scheduler,supervisor,provider,jobs,setNow(value){now=value;},draft:{title:'Chat task',provider:provider.id,threadMode:'new',prompt:'hello',trigger:{type:'queue'},times:[]}};
+  return {cwd,store,scheduler,provider,jobs,setNow(value){now=value;},draft:{title:'Chat task',provider:provider.id,threadMode:'new',prompt:'hello',trigger:{type:'queue'},times:[]}};
 }
 
-test('Doubao requires no project and ignores legacy archive paths without acquiring file leases',async t => {
+test('Doubao requires no project and ignores legacy archive paths',async t => {
   const f = fixture(t);
-  f.supervisor.leases.acquire({owner:'existing-research',cwd:f.cwd,provider:'workbuddyDesktop',paths:['.'],access:'write'});
   const first = await f.scheduler.saveTask({...f.draft,cwd:f.cwd});
   assert.equal(first.cwd,'');
   first.cwd = f.cwd; // A task saved before chat/workspace capabilities were separated.
@@ -43,18 +40,15 @@ test('Doubao requires no project and ignores legacy archive paths without acquir
   await f.scheduler.tick();
   assert.equal(f.jobs.length,1);
   assert.equal(f.jobs[0].run.fileLeaseOwner,undefined);
-  assert.equal(f.store.data.fileLeases.length,1);
-  assert.equal(f.store.data.fileLeases[0].state,'held');
   const second = await f.scheduler.saveTask({...f.draft,title:'Another chat'});
   assert.match(f.scheduler.readiness(second).reason,/一次只能/);
   f.jobs[0].finish({status:'completed'}); await new Promise(resolve => setImmediate(resolve));
   second.cwd = path.join(f.cwd,'deleted-archive');
   await f.scheduler.tick();
   assert.equal(f.jobs.length,2,'a nonexistent archive path cannot stop chat dispatch');
-  assert.equal(f.store.data.fileLeases.length,1);
 });
 
-test('Doubao daily recurrence remains independent of held research leases and waits for connection',async t => {
+test('Doubao daily recurrence waits for connection without consuming its pending slot',async t => {
   const f = fixture(t);
   const task = await f.scheduler.saveTask({...f.draft,trigger:{type:'time',recurrence:{frequency:'daily',time:'09:00'}}});
   f.setNow(task.times[0].at);
@@ -66,18 +60,6 @@ test('Doubao daily recurrence remains independent of held research leases and wa
   f.jobs[0].finish({status:'completed'}); await new Promise(resolve => setImmediate(resolve));
   f.setNow(task.times.find(slot=>slot.state==='pending').at);
   await f.scheduler.tick(); assert.equal(f.jobs.length,2);
-  assert.equal(f.store.data.fileLeases.length,0);
-});
-
-test('ordinary coding shares workspaces while supervised missions retain explicit file protection',async t => {
-  const f = fixture(t);
-  f.supervisor.leases.acquire({owner:'existing-research',cwd:f.cwd,provider:'workbuddyDesktop',paths:['.'],access:'write'});
-  const coding = {id:'coding',provider:'codex',cwd:f.cwd,sandbox:'workspace-write'};
-  assert.equal(f.supervisor.blocker(coding),null);
-  f.store.data.missions.push({id:'explicit',state:'scheduled',cwd:f.cwd,access:'write',writePaths:['.'],instructions:[],reviews:[]});
-  assert.match(f.supervisor.blocker({...coding,missionId:'explicit'}),/文件占用冲突/);
-  await assert.rejects(f.scheduler.saveTask({...f.draft,provider:'codex'}),/完整的本地文件夹/);
-  await assert.rejects(f.supervisor.create({title:'Invalid mission',provider:f.provider.id,cwd:f.cwd}),/可核验会话/);
 });
 
 test('native project selection is validated and existing conversations must belong to it',async t => {
@@ -93,8 +75,8 @@ test('native project selection is validated and existing conversations must belo
   await assert.rejects(f.scheduler.saveTask({...f.draft,nativeProjectId:'project-1',threadMode:'existing',threadId:'456'}),/不属于所选项目/);
 });
 
-test('without supervision, a chat is parallel to coding work in its former archive directory',async t => {
-  const f = fixture(t,false);
+test('a chat is parallel to coding work in its former archive directory',async t => {
+  const f = fixture(t);
   const chat = await f.scheduler.saveTask(f.draft);
   chat.cwd = f.cwd;
   f.scheduler.activeRuns.set('coding',{task:{id:'coding',provider:'codex',cwd:f.cwd,sandbox:'workspace-write'},run:{id:'coding',provider:'codex'}});

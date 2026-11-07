@@ -1,5 +1,5 @@
-import { $, element, icon, api, toast, confirmAction } from './api.js';
-import { Workspace } from './workspace.js';
+import { $, element, icon, api, toast, confirmAction, localDateFormat, localDateTimeInput, parseLocalDateTime } from './api.js';
+import { Workspace, ScheduledView } from './workspace.js';
 import { renderProviders } from './providers-view.js';
 import { SessionsView } from './sessions-view.js';
 const names = { idle: '空闲', working: '运行中', planning: '运行中', pending: '待执行', dispatching: '正在发送', running: '运行中', waiting: '等你处理', completed: '已完成', failed: '失败', interrupted: '已停止', uncertain: '待核实', missed: '已跳过', paused: '已暂停' };
@@ -16,6 +16,8 @@ let selectedTaskId = null;
 let selectedRunId = null;
 let threadCursor = null;
 let loadedThreads = [];
+let codexProjects = [];
+let projectRequest = 0;
 let savedThread = null;
 let requestSignature = '';
 let currentRun = null;
@@ -29,12 +31,14 @@ const historyActions=element('div','run-history-actions');historyActions.hidden=
 const handleRun=element('button','secondary','标记已处理'),deleteRun=element('button','text-button danger','删除记录'),restoreRun=element('button','secondary','恢复记录');
 for(const button of [handleRun,deleteRun,restoreRun])button.type='button';
 const historyNote=element('span','muted');historyActions.append(handleRun,deleteRun,restoreRun,historyNote);$('runError').after(historyActions);
+const runPath = element('p', 'run-workspace-path'); runPath.hidden = true; $('runTime').after(runPath);
+const runPermissions = element('p', 'field-help'); runPermissions.hidden = true; runPath.after(runPermissions);
 handleRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,currentRun?.attentionHandledAt?'remind':'dismiss'));
 deleteRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,'delete'));
 restoreRun.addEventListener('click',()=>void manageRunHistory(selectedRunId,'restore'));
 const deletedFilter=element('label','run-history-filter','已删除记录'),showDeletedRuns=element('input');showDeletedRuns.type='checkbox';deletedFilter.prepend(showDeletedRuns);$('runSearch').closest('.list-toolbar').after(deletedFilter);
 showDeletedRuns.addEventListener('change',()=>{selectedRunId=null;renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));});
-const visibleRuns=()=>state.runs.filter(run=>!!run.deletedAt===showDeletedRuns.checked);
+const visibleRuns=()=>state.runs.filter(run=>!!run.deletedAt===showDeletedRuns.checked && (!run.archivedAt || $('showArchivedRuns')?.checked));
 const pickedRuns=new Set(),runBatch=element('div','history-batch');
 const pickRuns=element('button','text-button','全选已结束记录'),clearPickedRuns=element('button','text-button','取消选择'),removePickedRuns=element('button','text-button danger','删除所选');
 for(const button of [pickRuns,clearPickedRuns,removePickedRuns])button.type='button';
@@ -60,14 +64,14 @@ removePickedRuns.addEventListener('click',async()=>{
 async function manageRunHistory(id,action){
   const run=state.runs.find(row=>row.id===id);if(!run)return;
   if(!state.historyManagement){toast('记录管理更新已准备；当前任务结束后重新启动后台即可使用。',true);return;}
-  if(action==='delete'&&!await confirmAction('删除“'+run.taskTitle+'”的工作台运行记录与顶部提示。项目文件、客户端对话和文件保护不受影响；可在“已删除记录”恢复。',{title:'删除运行记录',accept:'删除记录',danger:true}))return;
+  if(action==='delete'&&!await confirmAction('删除“'+run.taskTitle+'”的工作台运行记录与顶部提示。项目文件和客户端对话保留；可在“已删除记录”恢复。',{title:'删除运行记录',accept:'删除记录',danger:true}))return;
   try{await api('runs/'+id+'/history','POST',{action});await refreshState();await refreshRun();toast(action==='delete'?'记录已删除，可在“已删除记录”恢复。':action==='restore'?'记录已恢复。':action==='dismiss'?'已处理提醒，原始执行结果保留。':'已恢复提醒。');}
   catch(error){toast(error.message,true);}
 }
 const sessionsView = new SessionsView({ refresh: () => refreshState(), openRun: id => openRun(id), navigate: page => workspace.navigate(page), continueSession: session => continueSession(session) });
 async function continueSession(session) {
   if (!await resetForm()) return;
-  $('provider').value = session.provider; $('cwd').value = session.cwd || '';
+  $('provider').value = session.provider; restoreCodexProject({...session, nativeProjectId: session.nativeProjectId || session.projectId}); $('cwd').value = session.cwd || '';
   if (session.nativeProjectId) { $('nativeProject').append(new Option(session.nativeProjectName || session.nativeProjectId,session.nativeProjectId)); $('nativeProject').value = session.nativeProjectId; }
   if (session.provider === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true));
   $('taskTitle').value = '接续：' + (session.alias || session.name);
@@ -104,13 +108,26 @@ async function loadWatchThreads(selected = watchThread.value) {
   watchThread.value = selected || '';
 }
 
-const dateFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-const shortFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-const weekdayFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' });
-const clockFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const scheduled = new ScheduledView({
+  select: task => loadTask(task), openRun: id => openRun(id), create: () => resetForm(),
+  edit: async task => { await loadTask(task); $('editTask').click(); },
+  refresh: () => refreshState(), close: () => closeScheduleEditor(),
+});
+$('showArchivedRuns').addEventListener('change', () => {renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));});
+async function closeScheduleEditor() {
+  if(formDirty && !await confirmAction('当前修改尚未保存，放弃修改？',{title:'放弃修改',accept:'放弃修改'}))return;
+  formDirty=false;releaseEditing();workspace.showEditor(false);
+  const task=state.tasks.find(task=>task.id===selectedTaskId);
+  if(task)await loadTask(task,{force:true});
+}
+$('closeEditor').addEventListener('click',()=>void closeScheduleEditor());
+
+const dateFormat = localDateFormat({ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const shortFormat = localDateFormat({ month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const weekdayFormat = localDateFormat({ weekday: 'long' });
+const clockFormat = localDateFormat({ month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const formatDate = value => dateFormat.format(new Date(value));
-const chinaInput = value => new Date(value + 8 * 3600000).toISOString().slice(0, 19);
-const parseTime = value => Date.parse(value + (value.length === 16 ? ':00' : '') + '+08:00');
+const parseTime = parseLocalDateTime;
 const folderName = value => value?.split(/[\\/]/).filter(Boolean).at(-1) || value || '';
 const usesLocalFiles = provider => provider !== 'doubaoDesktop' && state.providers?.find(row => row.id === provider)?.capabilities.localFiles !== false;
 
@@ -122,76 +139,7 @@ function taskStatus(task) {
   return [...state.runs].reverse().find(run => run.taskId === task.id)?.status || 'missed';
 }
 
-function renderTaskList() {
-  const tasks = [...state.tasks].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
-  $('taskCount').textContent = tasks.length;
-  $('taskList').replaceChildren();
-  const search = $('taskSearch').value.trim().toLowerCase();
-  const shown = tasks.filter(task => (filter === 'all' || (filter === 'pending' ? hasPending(task) : !hasPending(task))) && (!search || [task.title,task.cwd,providerNames[task.provider]].join(' ').toLowerCase().includes(search)));
-  if (!shown.length) $('taskList').append(workspace.emptyQueue({filtered:!!tasks.length}));
-  for (const task of shown) {
-    const button = element('button', 'task-item' + (task.id === selectedTaskId ? ' selected' : ''));
-    button.type = 'button';
-    const content=element('span','task-content');
-    const top=element('span','task-top');
-    top.append(element('span','task-name',task.title));
-    content.append(top);
-    const folder = element('span', 'task-folder', providerNames[task.provider || 'codex'] + ' · ' + (usesLocalFiles(task.provider) ? folderName(task.cwd) : task.nativeProjectName || '普通聊天'));
-    folder.title = usesLocalFiles(task.provider) ? task.cwd : '直接发送聊天消息，不使用本地项目目录';
-    content.append(folder);
-    const bottom = element('span', 'task-bottom');
-    const next = task.times.find(slot => slot.state === 'pending');
-    const repeatLabel = task.trigger?.recurrence ? `${task.trigger.recurrence.frequency === 'daily' ? '每天' : '每周'} · ` : '';
-    const status = taskStatus(task);
-    top.append(element('span','badge '+status,names[status]));
-    bottom.append(element('span', 'task-date', hasPending(task) ? (task.trigger?.type === 'afterTask' ? '等待 ' + (state.tasks.find(parent => parent.id === task.trigger.taskId)?.title || '前置任务') : task.trigger?.type === 'afterConversation' ? '等待桌面对话' : next ? repeatLabel + shortFormat.format(new Date(next.at)) : '轮到时发送') : '本次任务已结束'));
-    content.append(bottom);
-    if (!activeStates.has(status) && ['blocked','editing'].includes(task.queueStatus?.status)) {
-      const reason = element('span', 'task-reason', task.queueStatus.reason);
-      reason.title = task.queueStatus.reason;
-      content.append(reason);
-    }
-    button.append(element('span','queue-number',String(tasks.indexOf(task)+1).padStart(2,'0')),content);
-    button.addEventListener('click', () => loadTask(task));
-    const row = element('div', 'queue-row');
-    row.append(button);
-    const actions = element('div', 'queue-actions');
-    actions.setAttribute('role', 'group');
-    actions.setAttribute('aria-label', task.title + '的队列操作');
-    const pendingRequest = state.requests.find(request => state.runs.some(run => run.id === request.runId && run.taskId === task.id));
-    if (pendingRequest) {
-      const respond = element('button', 'quiet', '处理确认'); respond.type = 'button';
-      respond.addEventListener('click', () => openRun(pendingRequest.runId)); actions.append(respond);
-    }
-    if(!activeStates.has(status) && task.queueStatus?.reason?.includes('文件占用冲突')){
-      const resolve=element('button','quiet','处理文件占用');resolve.type='button';
-      resolve.addEventListener('click',()=>{workspace.navigate('supervision');window.dispatchEvent(new Event('open-file-leases'));});actions.append(resolve);
-    }
-    if (hasPending(task)) {
-      const moves = element('div', 'queue-moves');
-      for (const [direction, label] of [[-1, '上移'], [1, '下移']]) {
-        const move = element('button', 'quiet', direction < 0 ? '↑' : '↓');
-        move.type = 'button'; move.setAttribute('aria-label', task.title + label);
-        move.addEventListener('click', () => reorderTask(task.id, direction));
-        moves.append(move);
-      }
-      actions.append(moves);
-    }
-    const remove = element('button', 'quiet danger queue-delete', '删除');
-    remove.type = 'button';
-    remove.setAttribute('aria-label', '删除任务：' + task.title);
-    remove.disabled = state.runs.some(run => run.taskId === task.id && activeStates.has(run.status));
-    remove.addEventListener('click', async () => {
-      remove.disabled = true;
-      try { await deleteQueueTask(task.id); }
-      finally { remove.disabled = false; }
-    });
-    actions.append(remove);
-    row.append(actions);
-    row.title = activeStates.has(status) ? names[status] : task.queueStatus?.reason || '';
-    $('taskList').append(row);
-  }
-}
+function renderTaskList() { scheduled.render(state, selectedTaskId, hasPending); }
 
 function addTime(at = Math.ceil((Date.now() + serverOffset + 3600000) / 60000) * 60000, status = 'pending') {
   const row = element('div', 'time-row');
@@ -201,7 +149,7 @@ function addTime(at = Math.ceil((Date.now() + serverOffset + 3600000) / 60000) *
   input.type = 'datetime-local';
   input.step = '1';
   input.required = true;
-  input.value = chinaInput(at);
+  input.value = localDateTimeInput(at);
   input.disabled = status !== 'pending';
   input.setAttribute('aria-label', '执行日期和时间 ' + ($('timeList').children.length + 1));
   const hint = element('p', 'time-date-hint');
@@ -231,7 +179,7 @@ function updateSummary() {
     const prefix = $('repeatFrequency').value === 'daily' ? '每天' : days.length ? `每周${days.map(day => day.slice(1)).join('、')}` : '请选择每周执行的星期';
     const task = state.tasks.find(task => task.id === selectedTaskId);
     const next = !editingId && task?.times.find(slot => slot.state === 'pending');
-    $('scheduleSummary').textContent = `${prefix} ${$('repeatTime').value || '请选择时间'}（北京时间）${next ? `；下次 ${formatDate(next.at)}` : ''}`;
+    $('scheduleSummary').textContent = `${prefix} ${$('repeatTime').value || '请选择时间'}${next ? `；下次 ${formatDate(next.at)}` : ''}`;
     return;
   }
   const times = [...$('timeList').querySelectorAll('input')].filter(input => !input.disabled).map(input => parseTime(input.value)).filter(Number.isFinite).sort((a, b) => a - b);
@@ -241,18 +189,19 @@ function updateSummary() {
 function toggleThreadMode() {
   const chat = $('provider').value === 'doubaoDesktop';
   const newOnly = $('provider').value !== 'codex' && state.providers?.find(row => row.id === $('provider').value)?.capabilities.resume === false;
-  for (const value of ['existing','previous']) {
+  for (const value of ['existing','previous','reuse']) {
     const radio = document.querySelector('input[name="threadMode"][value="'+value+'"]');
     radio.disabled = newOnly || (value === 'previous' && $('triggerType').value !== 'afterTask');
     if (newOnly && radio.checked) document.querySelector('input[name="threadMode"][value="new"]').checked = true;
   }
-  $('newThreadHelp').textContent = chat ? '首次在所选豆包项目中新建对话；后续周期继续使用该对话。不指定项目时新建普通聊天。停止运行仅停止监控，生成请在豆包中停止。' : '执行时新建对话；多个发送时间继续使用同一个对话。';
+  $('newThreadHelp').textContent = chat ? '每次触发都在所选豆包项目中创建独立对话；不指定项目时创建普通聊天。每次对话和结果保存在运行记录中。停止运行仅停止监控，生成请在豆包中停止。' : '每次触发都创建独立对话，使用保存的提示词；指定日期、每天、每周和立即运行均适用。每次运行的对话和结果保存在运行记录中。';
   const existing = document.querySelector('input[name="threadMode"]:checked').value === 'existing';
   $('existingThreadField').hidden = !existing;
   $('newThreadHelp').hidden = document.querySelector('input[name="threadMode"]:checked').value !== 'new';
   const desktop = ['antigravityDesktop', 'workbuddyDesktop', 'doubaoDesktop'].includes($('provider').value);
   $('threadSelect').required = existing && ($('provider').value === 'codex' || desktop);
   $('manualThreadField').hidden = $('provider').value === 'codex' || desktop;
+  scheduled.syncControls();
   if (existing && (!usesLocalFiles($('provider').value) || $('cwd').value.trim())) void loadThreads().catch(error => toast(error.message, true));
 }
 
@@ -265,6 +214,40 @@ async function loadNativeProjects() {
   for (const project of data.projects) $('nativeProject').append(new Option(project.name,project.id));
   if (selected && !data.projects.some(row => row.id === selected)) $('nativeProject').append(new Option('已保存项目（请在豆包展开后刷新）',selected));
   $('nativeProject').value = selected;
+}
+
+async function loadCodexProjects(selected = $('codexProject').value) {
+  if ($('provider').value !== 'codex') return;
+  const revision = ++projectRequest;
+  $('refreshCodexProjects').disabled = true;
+  try {
+    const data = await api('projects?provider=codex');
+    if (revision !== projectRequest || $('provider').value !== 'codex') return;
+    codexProjects = data.projects;
+    selected = codexProjects.find(project => project.aliases?.includes(selected))?.id || selected;
+    $('codexProject').replaceChildren(new Option('无', ''));
+    for (const project of codexProjects) {
+      const option = new Option(project.name, project.id);
+      option.title = (project.rootPaths || []).join('；');
+      $('codexProject').append(option);
+    }
+    if (selected && !codexProjects.some(project => project.id === selected)) $('codexProject').append(new Option('已保存项目（当前不可用，请重新选择）', selected));
+    $('codexProject').value = selected;
+    const project = codexProjects.find(project => project.id === selected);
+    if (project) $('cwd').value = project.rootPaths[0];
+    $('codexProjectHelp').textContent = '可选择客户端项目；选择“无”时创建独立聊天。';
+  } catch (error) {
+    if (revision === projectRequest) $('codexProjectHelp').textContent = '项目列表读取失败：' + error.message;
+  } finally { if (revision === projectRequest) $('refreshCodexProjects').disabled = !!selectedTaskId && editingId !== selectedTaskId; }
+}
+
+function restoreCodexProject(task = {}) {
+  ++projectRequest;
+  const id = task.provider === 'codex' ? task.nativeProjectId || '' : '';
+  $('codexProject').replaceChildren(new Option('无', ''));
+  if (id) $('codexProject').append(new Option(task.nativeProjectName || id, id));
+  $('codexProject').value = id;
+  void loadCodexProjects(id);
 }
 
 async function loadThreads(more = false) {
@@ -290,8 +273,10 @@ async function loadThreads(more = false) {
     $('folderHelp').textContent = '项目文件夹已确认，可以在其中运行。';
     const selected = $('threadSelect').value || savedThread?.id || '';
     const requestedProvider = $('provider').value;
-    const data = await api('threads?provider=' + encodeURIComponent(requestedProvider) + '&cwd=' + encodeURIComponent(folder.cwd) + (more && threadCursor ? '&cursor=' + encodeURIComponent(threadCursor) : ''));
+    const requestedProject = requestedProvider === 'codex' ? $('codexProject').value : '';
+    const data = await api('threads?provider=' + encodeURIComponent(requestedProvider) + '&cwd=' + encodeURIComponent(folder.cwd) + '&projectId=' + encodeURIComponent(requestedProject) + (more && threadCursor ? '&cursor=' + encodeURIComponent(threadCursor) : ''));
     if ($('cwd').value.trim() !== folder.cwd || $('provider').value !== requestedProvider) return;
+    if (requestedProvider === 'codex' && $('codexProject').value !== requestedProject) return;
     loadedThreads = more ? [...loadedThreads, ...data.threads] : data.threads;
     threadCursor = data.nextCursor;
     $('threadSelect').replaceChildren(new Option(loadedThreads.length ? '选择一个对话' : '这个项目还没有已保存的对话', ''));
@@ -303,6 +288,7 @@ async function loadThreads(more = false) {
 }
 
 async function resetForm(openEditor=true) {
+  if(openEditor && state.serverTime && state.scheduledTasksVersion!==1){toast('后台更新待生效，请等待当前任务结束后重启后台。',true);return false;}
   if(formDirty && !await confirmAction('当前修改尚未保存，放弃修改并新建任务？',{title:'放弃当前修改',accept:'放弃并新建'}))return false;
   releaseEditing();
   setFormEditable(true);
@@ -310,6 +296,9 @@ async function resetForm(openEditor=true) {
   selectedTaskId = null;
   savedThread = null;
   $('taskForm').reset();
+  $('repeatFrequency').value='daily';
+  scheduled.editing=false;scheduled.syncForm();
+  restoreCodexProject();
   $('timeList').replaceChildren();
   addTime();
   $('editorTitle').textContent = '新建任务';
@@ -321,7 +310,7 @@ async function resetForm(openEditor=true) {
   $('promptCount').textContent = '0 字';
   $('threadSelect').replaceChildren(new Option('先选择项目文件夹', ''));
   $('folderHelp').textContent = '直接在这个文件夹中运行，使用项目自己的说明和配置。';
-  $('newThreadHelp').textContent = '到点创建新对话；添加多个时间时，后续消息继续这个对话。';
+  $('newThreadHelp').textContent = '每次触发都创建独立对话，运行结果分别保存。';
   $('saveHint').textContent = '任务保存在本机';
   renderDependencies();
   toggleTrigger();
@@ -335,15 +324,15 @@ async function resetForm(openEditor=true) {
 }
 
 async function loadTask(task,{force=false}={}) {
-  if(!force && task.id===selectedTaskId && formDirty){workspace.showEditor();return;}
+  if(!force && task.id===selectedTaskId && formDirty)return;
   if(!force && formDirty && !await confirmAction('当前修改尚未保存，放弃修改并打开其他任务？',{title:'放弃当前修改',accept:'放弃并打开'}))return;
-  workspace.showEditor();
+  workspace.showEditor(false);
   releaseEditing();
   editingRevision = task.revision;
   setFormEditable(false);
   selectedTaskId = task.id;
   savedThread = task.threadId ? { id: task.threadId, name: task.threadTitle || task.title } : null;
-  $('provider').value = task.provider || 'codex';
+  $('provider').value = task.provider || 'codex'; restoreCodexProject(task);
   $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
   if (task.nativeProjectId) $('nativeProject').append(new Option(task.nativeProjectName || task.nativeProjectId,task.nativeProjectId));
   $('nativeProject').value = task.nativeProjectId || '';
@@ -370,13 +359,9 @@ async function loadTask(task,{force=false}={}) {
   $('prompt').value = task.prompt;
   $('promptCount').textContent = task.prompt.length + ' 字';
   document.querySelector(`input[name="threadMode"][value="${task.threadMode}"]`).checked = true;
-  $('sandbox').value = task.sandbox;
-  $('approval').value = task.approval;
   $('latePolicy').value = task.latePolicy;
-  $('model').value = task.model;
-  $('effort').value = task.effort;
+  scheduled.editing=true;scheduled.syncForm(task);
   renderProviderHelp();
-  $('networkAccess').checked = task.networkAccess;
   $('timeList').replaceChildren();
   if (task.trigger?.recurrence) addTime();
   else task.times.forEach(slot => addTime(slot.at, slot.state));
@@ -386,7 +371,6 @@ async function loadTask(task,{force=false}={}) {
   $('deleteTask').hidden = false;
   $('taskActions').hidden = false;
   $('threadSelect').replaceChildren(new Option(savedThread?.name || '选择一个对话', savedThread?.id || ''));
-  $('newThreadHelp').textContent = task.threadMode === 'new' && task.threadId ? '这个预约已经创建对话；后续执行时间继续使用这个对话。' : '到点创建新对话；添加多个时间时，后续消息继续这个对话。';
   selectedRunId = [...state.runs].reverse().find(run => run.taskId === task.id)?.id || null;
   toggleThreadMode();
   setFormEditable(false);
@@ -411,6 +395,7 @@ function renderTaskActions() {
   $('saveHint').textContent = editingId === task.id ? '正在编辑，这条消息暂不发送；保存后释放' : task.paused ? '任务已暂停' : '点击“编辑消息”修改尚未发送的内容';
   $('editorTitle').textContent=editingId===task.id?'编辑任务':'任务详情';
   $('taskReadiness').hidden=!task.queueStatus?.reason;
+  scheduled.syncControls();
   $('taskReadiness').textContent=busy ? '当前任务正在执行或等待处理。' : task.queueStatus?.reason || '';
 }
 
@@ -434,7 +419,7 @@ function renderRunList(){
     const button=element('button','run-item'+(run.id===selectedRunId?' selected':''));button.type='button';button.append(element('strong','',run.taskTitle));const meta=element('span','run-meta');meta.append(element('span','',shortFormat.format(new Date(run.startedAt))),element('span','badge '+run.status,names[run.status] || run.status));button.append(meta);button.addEventListener('click',()=>openRun(run.id));row.append(check,button);$('runList').append(row);
   }
 }
-function openRun(id){showDeletedRuns.checked=!!state.runs.find(run=>run.id===id)?.deletedAt;selectedRunId=id;requestSignature='';workspace.showRun();renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));}
+function openRun(id){$('showArchivedRuns').checked=!!state.runs.find(run=>run.id===id)?.archivedAt;showDeletedRuns.checked=!!state.runs.find(run=>run.id===id)?.deletedAt;selectedRunId=id;requestSignature='';workspace.showRun();renderRunOptions();void refreshRun().catch(error=>toast(error.message,true));}
 
 function renderRequests() {
   const requests = state.requests.filter(request => request.runId === selectedRunId);
@@ -549,7 +534,10 @@ async function refreshRun() {
   currentRun = run;
   $('copyOutput').disabled=false;
   $('runTitle').textContent=run.taskTitle;
-  $('runProvider').textContent=providerNames[run.provider || 'codex']+' · '+(usesLocalFiles(run.provider) ? folderName(run.cwd) : run.nativeProjectName || '普通聊天');
+  $('runProvider').textContent=providerNames[run.provider || 'codex']+' · '+(run.nativeProjectName || (usesLocalFiles(run.provider) ? folderName(run.cwd) : '普通聊天'));
+  runPath.hidden = !run.cwd; runPath.textContent = run.cwd || '';
+  runPermissions.hidden = !run.effectivePermissions;
+  if (run.effectivePermissions) { const p = run.effectivePermissions; runPermissions.textContent = `生效权限：${p.approvalsReviewer === 'auto_review' ? 'Codex 自动审批' : '人工审批'} · ${p.sandboxPolicy?.type === 'readOnly' ? '只读' : '允许修改项目'} · ${p.sandboxPolicy?.networkAccess ? '允许联网' : '禁止联网'}`; }
   $('runPrompt').textContent=run.prompt;
   $('runStatus').className = 'badge ' + run.status;
   $('runStatus').textContent = names[run.status] || run.status;
@@ -562,21 +550,23 @@ async function refreshRun() {
   handleRun.textContent=run.attentionHandledAt?'恢复提醒':'标记已处理';
   historyNote.textContent=!state.historyManagement?'记录管理更新已准备；当前任务结束后重新启动后台即可使用。':run.deletedAt?'已删除，可恢复。':run.attentionHandledAt?'提醒已处理；原始执行结果保留。':'处理提醒不会将待核实结果改为成功，也不会释放文件保护。';
   const codex = !!run.threadId && (run.provider || 'codex') === 'codex';
+  const nativeCodex = codex && run.execution === 'desktop';
   const active = activeStates.has(run.status);
-  $('openThread').hidden = !codex || active || run.status !== 'uncertain' && ['releasing', 'releaseFailed', 'owned'].includes(run.codexThreadState);
+  $('openThread').hidden = !codex || !nativeCodex && (active || run.status !== 'uncertain' && ['releasing', 'releaseFailed', 'owned'].includes(run.codexThreadState));
   $('openThread').href = run.threadId ? 'codex://threads/' + encodeURIComponent(run.threadId) : '#';
   $('openThread').textContent = run.status === 'uncertain' ? '在 Codex 中查看并核实' : '在 Codex 中打开对话';
-  $('handoffCodex').hidden = !codex || run.status === 'uncertain' || run.codexThreadState === 'released';
+  $('handoffCodex').hidden = !codex || nativeCodex || run.status === 'uncertain' || run.codexThreadState === 'released';
   $('handoffCodex').disabled = run.codexThreadState === 'releasing' || active && !run.turnId;
   $('handoffCodex').textContent = active ? '停止并交回 Codex' : run.codexThreadState === 'releasing' ? '正在释放对话…' : '释放对话并交回 Codex';
   $('codexConnectionNote').hidden = !codex;
-  $('codexConnectionNote').textContent = !codex ? '' : active
+  $('codexConnectionNote').textContent = !codex ? '' : nativeCodex ? '任务直接在 Codex 客户端的项目中执行，可随时打开原对话；模型、权限确认和提问均由客户端处理。' : active
     ? '此对话由调度器执行，回复和确认在本页处理。交回 Codex 会停止本轮并暂停后续预约，保留原对话。'
     : run.status === 'uncertain' ? '后台连接曾中断，执行结果尚未确认。请在 Codex 查看原对话后决定下一步，不会自动重发。'
     : run.codexThreadState === 'releaseFailed' ? '对话释放失败：' + run.codexReleaseError
     : run.codexThreadState === 'releasing' ? '正在释放 Codex 对话连接，完成后可在桌面打开。'
     : '原对话保存在 Codex；可按任务名称查找。';
   $('interruptRun').hidden = !activeStates.has(run.status) || !run.turnId;
+  $('interruptRun').textContent = nativeCodex ? '停止监控' : '停止运行';
   const output = run.output || run.logs.filter(log => log.type === 'delta').map(log => log.text).join('\n');
   $('runOutput').textContent = output || (activeStates.has(run.status) ? providerNames[run.provider || 'codex'] + ' 正在处理，回复会显示在这里。' : '这次运行没有文本回复。');
   $('runLog').textContent = run.logs.filter(log => !['delta', 'answer'].includes(log.type)).map(log => `[${clockFormat.format(new Date(log.at))}] ${log.text}`).join('\n\n');
@@ -588,9 +578,7 @@ async function refreshState() {
   refreshing = true;
   try {
     state = await api('state');
-    // Also support a backend that was started before queue/history filtering existed.
-    const deletedMissions = new Set((state.supervision?.missions || []).filter(mission => mission.deletedAt).map(mission => mission.id));
-    state.tasks = state.tasks.filter(task => !deletedMissions.has(task.missionId));
+    state.tasks = state.tasks.filter(task => !task.missionId);
     if (selectedTaskId && !state.tasks.some(task => task.id === selectedTaskId)) {
       formDirty = false;
       await resetForm(false);
@@ -600,8 +588,7 @@ async function refreshState() {
     $('engineStatus').textContent = '后台在线';
     $('engineStatus').className = 'engine-status connected';
     $('engineStatus').title = '本机调度后台已连接';
-    $('defaultModel').textContent = connection.defaults.model ? `当前 Codex 配置：${connection.defaults.model}${connection.defaults.effort ? `，推理强度 ${connection.defaults.effort}` : ''}。` : '';
-    if (connection.defaults.model) $('model').placeholder = '沿用 ' + connection.defaults.model;
+    renderProviderHelp();
     renderSettings();
     renderProviderHelp();
     renderTaskList();
@@ -619,20 +606,23 @@ async function refreshState() {
 
 $('taskForm').addEventListener('submit', async event => {
   event.preventDefault();
+  if(state.scheduledTasksVersion!==1)return toast('请重启后台以启用新版定时任务；运行中的任务请先等待结束。',true);
   const repeating = $('triggerType').value === 'time' && $('repeatFrequency').value !== 'once';
   const times = $('triggerType').value === 'time' && !repeating ? [...$('timeList').querySelectorAll('input')].map(input => parseTime(input.value)) : [];
   const threadId = $('provider').value === 'codex' || ['antigravityDesktop','workbuddyDesktop','doubaoDesktop'].includes($('provider').value) ? $('threadSelect').value : $('manualThread').value.trim() || $('threadSelect').value;
   const input = {
     provider: $('provider').value, revision: editingRevision, editToken, timeoutMinutes: Number($('timeoutMinutes').value),
     trigger: { type: $('triggerType').value, taskId: $('afterTask').value, runId: $('afterRun').value || null, onFailure: $('onFailure').value },
-    title: $('taskTitle').value, cwd: usesLocalFiles($('provider').value) ? $('cwd').value : '', prompt: $('prompt').value, times,
-    nativeProjectId: $('provider').value === 'doubaoDesktop' ? $('nativeProject').value : '',
+    title: $('taskTitle').value.trim() || $('prompt').value.trim().split('\n')[0].slice(0,100), cwd: $('provider').value !== 'codex' && usesLocalFiles($('provider').value) ? $('cwd').value : '', prompt: $('prompt').value, times,
+    nativeProjectId: $('provider').value === 'codex' ? $('codexProject').value : $('provider').value === 'doubaoDesktop' ? $('nativeProject').value : '',
     threadMode: document.querySelector('input[name="threadMode"]:checked').value,
     threadId, threadTitle: loadedThreads.find(thread => thread.id === threadId)?.name || savedThread?.name || '',
-    sandbox: $('sandbox').value, approval: $('approval').value, latePolicy: $('latePolicy').value,
-    model: $('model').value, effort: $('effort').value, networkAccess: $('networkAccess').checked,
+    latePolicy: $('latePolicy').value,
+    notificationPolicy: $('notificationPolicy').value, archiveSuccessful: $('archiveSuccessful').checked,
+    model: $('taskModel').disabled ? '' : $('taskModel').value.trim(), effort: $('taskEffort').disabled ? '' : $('taskEffort').value,
+
   };
-  if (repeating) input.trigger.recurrence = { frequency: $('repeatFrequency').value, time: $('repeatTime').value, weekdays: [...document.querySelectorAll('input[name="weekday"]:checked')].map(input => Number(input.value)), timezone: 'Asia/Shanghai' };
+  if (repeating) input.trigger.recurrence = { frequency: $('repeatFrequency').value, time: $('repeatTime').value, weekdays: [...document.querySelectorAll('input[name="weekday"]:checked')].map(input => Number(input.value)), timezone: 'local' };
   if (input.trigger.type === 'afterConversation') Object.assign(input.trigger, { provider: $('watchProvider').value, threadId: $('watchThread').value, rearm: rearmWatch.checked });
   if ($('triggerType').value === 'time' && !repeating && (!times.length || times.some(value => !Number.isFinite(value)))) return toast('请至少选择一个有效的执行时间。', true);
   if (repeating && input.trigger.recurrence.frequency === 'weekly' && !input.trigger.recurrence.weekdays.length) return toast('请至少选择一个星期。', true);
@@ -641,6 +631,7 @@ $('taskForm').addEventListener('submit', async event => {
     const task = await api(selectedTaskId ? 'tasks/' + selectedTaskId : 'tasks', selectedTaskId ? 'PUT' : 'POST', input);
     await refreshState();
     await loadTask(task,{force:true});
+    workspace.showEditor(false);
     toast(task.paused ? '修改已保存；恢复任务后才会执行。' : '任务已保存，将按发送条件执行。');
   } catch (error) { toast(error.message, true); }
   finally { if (selectedTaskId) renderTaskActions(); else $('saveTask').disabled = false; }
@@ -704,19 +695,16 @@ $('runTask').addEventListener('click', async () => {
 async function deleteQueueTask(id) {
   const task = state.tasks.find(task => task.id === id);
   if (!task) return;
-  const message = task.missionId
-    ? '删除“' + task.title + '”所属的督导任务及其全部队列指令。未发送的指令将暂停，运行记录和验收证据保留。已结束运行的文件占用会释放，状态不明的占用需核实；任务可在“已删除任务”中恢复。'
-    : '删除“' + task.title + '”及其未来发送时间。已有运行记录会保留。';
+  const message = '删除“' + task.title + '”及其未来发送时间。已有运行记录会保留。';
   if (!await confirmAction(message,{title:'删除任务',accept:'删除任务',danger:true})) return;
   try {
-    if (task.missionId) await api('supervision/history', 'POST', { ids: [task.missionId], action: 'delete' });
-    else await api('tasks/' + id, 'DELETE');
-    if (selectedTaskId === id || (task.missionId && state.tasks.find(item => item.id === selectedTaskId)?.missionId === task.missionId)) {
+    await api('tasks/' + id, 'DELETE');
+    if (selectedTaskId === id) {
       formDirty = false;
       await resetForm(false);
     }
     await refreshState();
-    toast(task.missionId ? '督导任务及其指令已移出队列，可在“已删除任务”恢复。' : '任务已删除，运行记录已保留。');
+    toast('任务已删除，运行记录已保留。');
   }
   catch (error) { toast(error.message, true); }
 }
@@ -725,7 +713,7 @@ $('duplicateTask').addEventListener('click', async () => {
   const task = state.tasks.find(task => task.id === selectedTaskId);
   if(!await resetForm())return;
   $('taskTitle').value = task.title + '（副本）';
-  $('provider').value = task.provider || 'codex';
+  $('provider').value = task.provider || 'codex'; restoreCodexProject(task);
   renderProviderHelp();
   $('cwd').value = task.cwd;
   $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
@@ -734,12 +722,7 @@ $('duplicateTask').addEventListener('click', async () => {
   void loadNativeProjects().catch(error => toast(error.message,true));
   $('prompt').value = task.prompt;
   $('promptCount').textContent = task.prompt.length + ' 字';
-  $('sandbox').value = task.sandbox;
-  $('approval').value = task.approval;
   $('latePolicy').value = task.latePolicy;
-  $('networkAccess').checked = task.networkAccess;
-  $('model').value = task.model;
-  $('effort').value = task.effort;
   renderProviderHelp();
   formDirty=true;
 });
@@ -759,7 +742,8 @@ $('handoffCodex').addEventListener('click', async () => {
   finally { if (currentRun?.id === run.id) $('handoffCodex').disabled = false; }
 });
 $('interruptRun').addEventListener('click', async () => {
-  if (!await confirmAction('停止当前运行。已完成的文件修改会保留。',{title:'停止运行',accept:'停止运行',danger:true})) return;
+  const nativeCodex = currentRun?.provider === 'codex' && currentRun.execution === 'desktop';
+  if (!await confirmAction(nativeCodex ? '停止工作台监控并暂停后续接续。当前任务继续在 Codex 客户端运行。' : '停止当前运行。已完成的文件修改会保留。',{title:nativeCodex?'停止监控':'停止运行',accept:nativeCodex?'停止监控':'停止运行',danger:true})) return;
   try { await api(`runs/${selectedRunId}/interrupt`, 'POST'); await refreshState(); }
   catch (error) { toast(error.message, true); }
 });
@@ -773,6 +757,7 @@ $('stopBackend').addEventListener('click', async () => {
 function setFormEditable(editable) {
   for (const node of $('taskForm').querySelectorAll('input, select, textarea, button')) node.disabled = !editable || (node.matches('input[type="datetime-local"]') && node.closest('.time-row').dataset.state!=='pending');
   $('saveTask').disabled = !editable;
+  scheduled.syncControls();scheduled.cancel.disabled=false;
 }
 
 function releaseEditing() {
@@ -802,7 +787,8 @@ function toggleTrigger() {
   const repeating = kind === 'time' && $('repeatFrequency').value !== 'once';
   $('timeFields').hidden = kind !== 'time';
   $('onceFields').hidden = repeating;
-  $('repeatFields').hidden = !repeating;
+  $('repeatFields').hidden = true;
+  $('scheduleTimeRow').hidden = !repeating;
   $('weekdayFields').hidden = $('repeatFrequency').value !== 'weekly';
   $('repeatTime').required = repeating;
   $('dependencyFields').hidden = kind !== 'afterTask';
@@ -810,7 +796,7 @@ function toggleTrigger() {
   $('watchThread').required = kind === 'afterConversation';
   $('afterTask').required = kind === 'afterTask';
   $('timeList').querySelectorAll('input').forEach(input => { input.required = kind === 'time' && !repeating; });
-  $('triggerHelp').textContent = kind === 'time' ? (repeating ? '按北京时间持续重复，暂停或删除任务后停止。后台关闭或电脑睡眠时不能发送；恢复后最多补跑一次，或按高级设置跳过。' : '每个时间发送一次；发送前可编辑。') : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
+  $('triggerHelp').textContent = kind === 'time' ? (repeating ? '按电脑本地时间持续重复，暂停或删除任务后停止。后台关闭或电脑睡眠时不能发送；恢复后最多补跑一次，或按高级设置跳过。' : '每个时间发送一次；发送前可编辑。') : kind === 'queue' ? '保存后即可排队，当前运行结束后依次发送。需要晚上开始时，请先暂停队列。' : kind === 'afterConversation' ? '等待桌面端此刻正在运行的任务。需要确认、失败或连接中断时不会自动接续；目标消息发送前可编辑。' : '默认只在前置任务成功后接续。可跨 Agent 接续；沿用对话时需要相同 Agent 和文件夹。';
   const previous = document.querySelector('input[name="threadMode"][value="previous"]');
   previous.disabled = kind !== 'afterTask' || (!!selectedTaskId && editingId !== selectedTaskId);
   if (kind !== 'afterTask' && previous.checked) { document.querySelector('input[name="threadMode"][value="new"]').checked = true; toggleThreadMode(); }
@@ -819,22 +805,20 @@ function toggleTrigger() {
 
 function renderProviderHelp() {
   const id = $('provider').value;
-  $('projectFields').hidden = !usesLocalFiles(id);
-  $('cwd').required = usesLocalFiles(id);
+  $('projectFields').hidden = id === 'codex' || !usesLocalFiles(id);
+  $('codexProjectFields').hidden = id !== 'codex';
+  $('cwd').required = id !== 'codex' && usesLocalFiles(id);
+  $('codexProject').required = false;
   $('nativeProjectFields').hidden = id !== 'doubaoDesktop';
   $('threadSelectLabel').textContent = id === 'doubaoDesktop' ? '豆包已有对话（客户端已加载）' : '项目中的已有对话';
   const provider = state.providers?.find(provider => provider.id === id);
   const desktop = provider?.capabilities.desktop;
-  $('providerHelp').textContent = id === 'codex' ? '由调度器执行 Codex 对话，回复与权限确认在“运行记录”处理。运行结束后释放连接；需要在桌面继续时，点击“停止并交回 Codex”。' : `${provider?.detail || '等待后台检测'}。` + (desktop ? '直接发送到桌面会话；权限确认和提问请在原客户端处理。' : '使用独立 CLI 入口，版本和登录可能与桌面端不同。');
-  $('timeoutMinutes').closest('.timeout-field').hidden = id === 'codex';
+  $('providerHelp').textContent = id === 'codex' ? '直接发送到 Codex 客户端所选项目中的对话；模型、权限确认和提问均在客户端处理。' : `${provider?.detail || '等待后台检测'}。` + (desktop ? '直接发送到桌面会话；权限确认和提问请在原客户端处理。' : '使用独立 CLI 入口，版本和登录可能与桌面端不同。');
+  $('timeoutMinutes').closest('.timeout-field').hidden = false;
   $('timeoutMinutes').closest('.timeout-field').querySelector('.field-help').textContent = desktop ? '超过监控时间会暂停接续，保留发送记录；客户端中的任务继续运行。' : '到达上限会停止 CLI 并暂停队列，保留结果供核实。';
-  for (const key of ['sandbox', 'approval', 'networkAccess']) $(key).parentElement.hidden = id !== 'codex';
-  $('defaultModel').textContent = id === 'codex' ? `Codex 当前配置：${state.connection.defaults.model || '默认模型'}。` : desktop ? (id === 'antigravityDesktop' ? '使用桌面服务默认模型，也可填写桌面模型列表中的完整名称。其他权限由客户端处理。' : '复用桌面账号和会话设置；需要确认时在原客户端处理。') : '文件、命令和网络权限遵循本机 CLI 设置；CLI 需要交互时可能失败，请先完成登录和所需权限配置。';
-  $('model').parentElement.hidden = desktop && !provider.capabilities.model;
-  $('effort').parentElement.hidden = desktop;
-  if (desktop) { $('effort').value = ''; if (!provider.capabilities.model) $('model').value = ''; }
-  $('model').placeholder = '沿用 ' + (id === 'codex' ? state.connection.defaults.model || '当前配置' : providerNames[id] + ' 配置');
+  $('defaultModel').textContent = id === 'codex' ? '沿用 Codex 客户端的权限模式和目标项目的模型、网络配置。'  : desktop ? (id === 'antigravityDesktop' ? '使用桌面服务默认模型，也可填写桌面模型列表中的完整名称。其他权限由客户端处理。' : '复用桌面账号和会话设置；需要确认时在原客户端处理。') : '文件、命令和网络权限遵循本机 CLI 设置；CLI 需要交互时可能失败，请先完成登录和所需权限配置。';
   $('manualThreadField').hidden = id === 'codex' || desktop;
+  scheduled.syncControls();
 }
 
 function renderSettings() {
@@ -866,6 +850,7 @@ $('editTask').addEventListener('click', async () => {
     await api(`tasks/${id}/hold`, 'POST', { token: editToken });
     if (selectedTaskId !== id) { await api(`tasks/${id}/release`, 'POST', { token: editToken }); return; }
     editingId = id;
+    scheduled.editing=true;workspace.showEditor();
     setFormEditable(true);
     toggleTrigger();
     renderTaskActions();
@@ -880,7 +865,7 @@ $('cancelEdit').addEventListener('click', () => { const task = state.tasks.find(
 $('followTask').addEventListener('click', async () => {
   const parent = state.tasks.find(task => task.id === selectedTaskId);
   if(!await resetForm())return;
-  $('provider').value = parent.provider || 'codex'; $('cwd').value = parent.cwd;
+  $('provider').value = parent.provider || 'codex'; restoreCodexProject(parent); $('cwd').value = parent.cwd;
   $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
   if (parent.nativeProjectId) $('nativeProject').append(new Option(parent.nativeProjectName || parent.nativeProjectId,parent.nativeProjectId));
   $('nativeProject').value = parent.nativeProjectId || '';
@@ -899,7 +884,18 @@ $('refreshProjects').addEventListener('click', () => loadNativeProjects().catch(
 $('nativeProject').addEventListener('change', () => { savedThread = null; $('threadSelect').value = ''; void loadThreads().catch(error => toast(error.message,true)); });
 document.querySelectorAll('input[name="weekday"]').forEach(input => input.addEventListener('change', updateSummary));
 $('afterTask').addEventListener('change', () => renderDependencyRuns());
-$('provider').addEventListener('change', () => { savedThread = null; $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); if ($('provider').value === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true)); });
+$('provider').addEventListener('change', () => { savedThread = null; restoreCodexProject(); $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); if ($('provider').value === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true)); });
+
+$('refreshCodexProjects').addEventListener('click', () => void loadCodexProjects());
+$('codexProject').addEventListener('change', () => {
+  ++projectRequest;
+  $('refreshCodexProjects').disabled = false;
+  const project = codexProjects.find(project => project.id === $('codexProject').value);
+  if (project?.rootPaths?.length) $('cwd').value = project.rootPaths[0];
+  savedThread = null; loadedThreads = []; threadCursor = null;
+  $('threadSelect').replaceChildren(new Option('选择项目中的对话', ''));
+  if (document.querySelector('input[name="threadMode"]:checked').value === 'existing') void loadThreads().catch(error => toast(error.message, true));
+});
 $('toggleQueue').addEventListener('click', async () => { try { await api('settings', 'POST', { queuePaused: !state.settings?.queuePaused }); await refreshState(); } catch (error) { toast(error.message, true); } });
 for (const key of ['pauseOnFailure', 'keepAwake', 'autostart']) $(key).addEventListener('change', async () => { try { await api('settings', 'POST', { [key]: $(key).checked }); await refreshState(); } catch (error) { toast(error.message, true); await refreshState(); } });
 window.addEventListener('pagehide', () => {
@@ -907,7 +903,7 @@ window.addEventListener('pagehide', () => {
 });
 
 resetForm(false);
-setInterval(() => { $('currentTime').textContent = clockFormat.format(new Date(Date.now() + serverOffset)) + ' 北京时间'; }, 1000);
+setInterval(() => { $('currentTime').textContent = clockFormat.format(new Date(Date.now() + serverOffset)); }, 1000);
 const events = new EventSource('/api/events');
 events.addEventListener('change', () => refreshState().catch(error => toast(error.message, true)));
 events.addEventListener('ready', () => refreshState().catch(error => toast(error.message, true)));

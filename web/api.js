@@ -1,4 +1,14 @@
 export const $ = id => document.getElementById(id);
+export const localDateFormat = options => ({ format: value => new Intl.DateTimeFormat('zh-CN', options).format(value) });
+export function localDateTimeInput(value) {
+  const date = new Date(value), pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+export function parseLocalDateTime(value) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value)) return NaN;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && localDateTimeInput(at).slice(0,value.length) === value ? at : NaN;
+}
 export function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!=null)node.textContent=text;return node;}
 export function icon(name){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','icon');svg.setAttribute('aria-hidden','true');const use=document.createElementNS(svg.namespaceURI,'use');use.setAttribute('href','#i-'+name);svg.append(use);return svg;}
 let dialogSequence=0;

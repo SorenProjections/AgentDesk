@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateRecurrence, nextOccurrence } from '../lib/recurrence.mjs';
 
-const at = value => Date.parse(value + '+08:00');
-test('daily calendar uses Beijing time across month/year boundaries and exact matches', () => {
+const at = value => Date.parse(value);
+test('daily calendar uses computer local time across month/year boundaries and exact matches', () => {
   const schedule = validateRecurrence({ frequency: 'daily', time: '00:05' });
   assert.equal(nextOccurrence(schedule, at('2026-12-31T23:59:00')), at('2027-01-01T00:05:00'));
   assert.equal(nextOccurrence(schedule, at('2027-01-01T00:05:00')), at('2027-01-02T00:05:00'));

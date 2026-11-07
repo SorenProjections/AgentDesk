@@ -100,6 +100,8 @@ test('release failure remains visible and an explicit retry can finish handoff',
 
 test('the next turn waits until the previous connection has been released', async t => {
   const { scheduler, client, task } = await fixture(t);
+  task.threadMode = 'reuse';
+  task.threadMode = 'reuse';
   const run = await scheduler.runNow(task.id);
   let release; client.releaseGate = new Promise(resolve => release = resolve);
   client.complete(run.threadId);

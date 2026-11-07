@@ -7,15 +7,13 @@ import { ControlClient } from '../lib/control-client.mjs';
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') return { commands: [
-    'status', 'sessions [--provider workbuddyDesktop] [--cwd <目录>]', 'missions', 'create --file <任务.json>',
-    'get|observe <任务ID>', 'bind|dispatch|review|correct|pause|resume <任务ID> [--file <参数.json>]',
-    'evidence <任务ID> [--refresh]', 'interrupt <运行ID>', 'release <占用ID> --file <核验说明.json>'
+    'status', 'experts', 'sessions [--provider workbuddyDesktop] [--cwd <目录>]', 'tasks', 'projects --provider codex', 'create --file <普通任务.json>',
+    'get <运行ID>', 'pause|resume|run <任务ID>', 'interrupt <运行ID>'
   ], options: '--url http://127.0.0.1:<端口>; --file <JSON文件或->; --json <JSON>',
-  note: 'dispatch/correct 会安排真实任务；使用 requestId 防重复。evidence --refresh 会重新执行保存的验收命令。' };
+  note: 'create 保存普通任务，并按发送条件执行；run 会立即执行一次。' };
   const options = {}, positional = [];
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--refresh') options.refresh = true;
-    else if (['--file', '--json', '--url', '--provider', '--cwd'].includes(rest[i])) {
+    if (['--file', '--json', '--url', '--provider', '--cwd'].includes(rest[i])) {
       if (!rest[i + 1]) throw new Error('参数缺少值：' + rest[i]);
       options[rest[i].slice(2)] = rest[++i];
     } else if (rest[i].startsWith('--')) throw new Error('未知参数：' + rest[i]);
@@ -28,7 +26,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === 'status') {
     const s = await client.request('state');
     return { serverTime: s.serverTime, timezone: s.timezone, activeRunId: s.activeRunId,
-      providers: s.providers?.map(({ id, name, available, detail }) => ({ id, name, available, detail })), supervision: s.supervision };
+      providers: s.providers?.map(({ id, name, available, detail }) => ({ id, name, available, detail })) };
   }
   if (command === 'sessions') {
     const params = new URLSearchParams();
@@ -36,15 +34,17 @@ export async function main(argv = process.argv.slice(2)) {
     if (options.cwd) params.set('cwd', options.cwd);
     return client.request('threads?' + params);
   }
-  if (command === 'missions') return client.request('supervision');
-  if (command === 'create') return client.request('supervision/missions', 'POST', payload);
-  if (!id || positional.length !== 1 || !/^[a-zA-Z0-9-]+$/.test(id)) throw new Error('请提供唯一有效的任务、运行或占用 ID。');
-  if (command === 'get') return client.request('supervision/missions/' + id);
-  if (command === 'observe') return client.request('supervision/missions/' + id + '/observe');
-  if (command === 'evidence') return client.request('supervision/missions/' + id + '/evidence', options.refresh ? 'POST' : 'GET', payload);
-  if (['bind', 'dispatch', 'review', 'correct', 'pause', 'resume'].includes(command)) return client.request('supervision/missions/' + id + '/' + command, 'POST', payload);
+  if (command === 'experts') {
+    if (positional.length || (options.provider && options.provider !== 'workbuddyDesktop')) throw new Error('experts 仅支持 workbuddyDesktop 目录读取。');
+    return client.request('desktop/workbuddy/experts');
+  }
+  if (command === 'tasks') return (await client.request('state')).tasks;
+  if (command === 'projects') return client.request('projects?' + new URLSearchParams({provider:options.provider || 'codex'}));
+  if (command === 'create') return client.request('tasks', 'POST', payload);
+  if (!id || positional.length !== 1 || !/^[a-zA-Z0-9-]+$/.test(id)) throw new Error('请提供唯一有效的任务或运行 ID。');
+  if (command === 'get') return client.request('runs/' + id);
+  if (['pause', 'resume', 'run'].includes(command)) return client.request('tasks/' + id + '/' + command, 'POST', payload);
   if (command === 'interrupt') return client.request('runs/' + id + '/interrupt', 'POST');
-  if (command === 'release') return client.request('supervision/leases/' + id + '/release', 'POST', payload);
   throw new Error('未知命令：' + command);
 }
 

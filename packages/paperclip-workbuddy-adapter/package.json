@@ -1,0 +1,20 @@
+{
+  "name": "agentdesk-paperclip-workbuddy-adapter",
+  "version": "0.1.0",
+  "description": "Local WorkBuddy CLI adapter for Paperclip, based on AgentDesk's integration.",
+  "type": "module",
+  "license": "MIT",
+  "author": "SorenProjections",
+  "exports": {
+    ".": { "types": "./src/index.d.ts", "import": "./src/index.js" }
+  },
+  "files": ["src", "scripts/smoke.js", "README.md", "LICENSE"],
+  "engines": { "node": ">=24.11.0" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": { "@paperclipai/adapter-utils": "2026.1005.0" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "~5.9.3" }
+}
