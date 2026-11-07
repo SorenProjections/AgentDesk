@@ -142,6 +142,17 @@ test('WorkBuddy expert catalog uses only whitelisted SDK channels and redacts pr
   await assert.rejects(p.expertsInvoke('configure'),/不支持/);
 });
 
+test('WorkBuddy project options come from native conversation directories and deduplicate paths',async()=>{
+  const p=new WorkBuddyDesktop(),cwd=process.cwd(),other=path.join(cwd,'other');let reads=0;
+  p.invoke=async(method)=>{assert.equal(method,'local:list');reads++;return{items:[
+    {id:'first',space:{cwd}}, {id:'same',space:{cwd:cwd.toUpperCase()}},
+    {id:'other',cwd:other}, {id:'missing'}, {id:'relative',cwd:'relative-project'}
+  ]};};
+  const projects=await p.listProjects();
+  assert.equal(reads,1);assert.deepEqual(projects.map(project=>project.cwd),[cwd,other]);
+  assert.deepEqual(projects[0],{id:cwd,name:path.basename(cwd),cwd,rootPaths:[cwd]});
+});
+
 test('WorkBuddy team selection verifies actual type and readback before one send and saves checkpoint',async()=>{
   const f=expertFixture();const result=await f.p.start(f.task,f.run,f.hooks).completion;
   assert.equal(result.status,'completed');

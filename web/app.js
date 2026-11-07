@@ -18,6 +18,8 @@ let threadCursor = null;
 let loadedThreads = [];
 let codexProjects = [];
 let projectRequest = 0;
+let workbuddyProjectRequest = 0;
+let nativeProjectRequest = 0;
 let savedThread = null;
 let requestSignature = '';
 let currentRun = null;
@@ -207,13 +209,43 @@ function toggleThreadMode() {
 
 async function loadNativeProjects() {
   if ($('provider').value !== 'doubaoDesktop') return;
+  const revision = ++nativeProjectRequest;
   const selected = $('nativeProject').value;
   const data = await api('projects?provider=doubaoDesktop');
-  if ($('provider').value !== 'doubaoDesktop' || $('nativeProject').value !== selected) return;
+  if (revision !== nativeProjectRequest || $('provider').value !== 'doubaoDesktop' || $('nativeProject').value !== selected) return;
   $('nativeProject').replaceChildren(new Option('不指定项目（普通聊天）',''));
   for (const project of data.projects) $('nativeProject').append(new Option(project.name,project.id));
   if (selected && !data.projects.some(row => row.id === selected)) $('nativeProject').append(new Option('已保存项目（请在豆包展开后刷新）',selected));
   $('nativeProject').value = selected;
+}
+
+function restoreWorkbuddyProject() {
+  if ($('provider').value !== 'workbuddyDesktop') return;
+  const cwd = $('cwd').value.trim(), select = $('workbuddyProject');
+  if (![...select.options].some(option=>option.value==='__browse__')) select.append(new Option('选择其他文件夹…','__browse__'));
+  if (cwd && ![...select.options].some(option => option.value === cwd)) select.add(new Option(folderName(cwd), cwd),select.querySelector('option[value="__browse__"]'));
+  select.value = cwd;
+  select.title=cwd;
+  $('workbuddyProjectPath').textContent=cwd;$('workbuddyProjectPath').title=cwd;
+}
+
+async function loadWorkbuddyProjects() {
+  if ($('provider').value !== 'workbuddyDesktop') return;
+  const revision = ++workbuddyProjectRequest, requestedCwd = $('cwd').value.trim();
+  restoreWorkbuddyProject();$('refreshWorkbuddyProjects').disabled = true;
+  try {
+    const data = await api('projects?provider=workbuddyDesktop');
+    if (revision !== workbuddyProjectRequest || $('provider').value !== 'workbuddyDesktop' || $('cwd').value.trim() !== requestedCwd) return;
+    const select = $('workbuddyProject');select.replaceChildren(new Option('选择项目', ''));
+    for (const project of data.projects) {
+      const cwd = project.cwd || project.rootPaths?.[0];if (!cwd) continue;
+      const duplicates=data.projects.filter(other=>other.name===project.name).length>1;
+      const option = new Option(duplicates?`${project.name}（${folderName(cwd.replace(/[\\/][^\\/]+[\\/]?$/,''))}）`:project.name, cwd);option.title = cwd;select.append(option);
+    }
+    select.append(new Option('选择其他文件夹…','__browse__'));
+    restoreWorkbuddyProject();
+  } catch (error) { toast('WorkBuddy 项目列表读取失败，仍可选择本地文件夹：' + error.message, true); }
+  finally { if (revision === workbuddyProjectRequest) $('refreshWorkbuddyProjects').disabled = false; }
 }
 
 async function loadCodexProjects(selected = $('codexProject').value) {
@@ -361,6 +393,7 @@ async function loadTask(task,{force=false}={}) {
   document.querySelector(`input[name="threadMode"][value="${task.threadMode}"]`).checked = true;
   $('latePolicy').value = task.latePolicy;
   scheduled.editing=true;scheduled.syncForm(task);
+  if (task.provider === 'workbuddyDesktop') void loadWorkbuddyProjects();
   renderProviderHelp();
   $('timeList').replaceChildren();
   if (task.trigger?.recurrence) addTime();
@@ -657,7 +690,7 @@ $('pickFolder').addEventListener('click', async () => {
   $('pickFolder').textContent = '选择窗口已打开';
   try {
     const result = await api('folders/pick', 'POST', { cwd: $('cwd').value }, 310000);
-    if (!result.cancelled) { $('cwd').value = result.cwd; formDirty=true; savedThread = null; await loadThreads(); }
+    if (!result.cancelled) { $('cwd').value = result.cwd; restoreWorkbuddyProject(); formDirty=true; savedThread = null; await loadThreads(); }
   } catch (error) { toast(error.message, true); }
   finally { $('pickFolder').disabled = false; $('pickFolder').replaceChildren(icon('folder'),document.createTextNode('选择')); }
 });
@@ -885,6 +918,18 @@ $('nativeProject').addEventListener('change', () => { savedThread = null; $('thr
 document.querySelectorAll('input[name="weekday"]').forEach(input => input.addEventListener('change', updateSummary));
 $('afterTask').addEventListener('change', () => renderDependencyRuns());
 $('provider').addEventListener('change', () => { savedThread = null; restoreCodexProject(); $('manualThread').value = ''; $('threadSelect').replaceChildren(new Option('选择一个对话', '')); renderProviderHelp(); toggleThreadMode(); if ($('provider').value === 'doubaoDesktop') void loadNativeProjects().catch(error => toast(error.message,true)); });
+$('provider').addEventListener('change', () => {
+  if ($('provider').value === 'workbuddyDesktop') void loadWorkbuddyProjects();
+  else ++workbuddyProjectRequest;
+});
+$('workbuddyProject').addEventListener('refresh', () => void loadWorkbuddyProjects());
+$('workbuddyProject').addEventListener('change', () => {
+  if ($('workbuddyProject').value === '__browse__') { restoreWorkbuddyProject();$('pickFolder').click();return; }
+  $('cwd').value = $('workbuddyProject').value;savedThread = null;$('threadSelect').value = '';formDirty = true;
+  restoreWorkbuddyProject();
+  if (document.querySelector('input[name="threadMode"]:checked').value === 'existing') void loadThreads().catch(error=>toast(error.message,true));
+});
+$('cwd').addEventListener('change', restoreWorkbuddyProject);
 
 $('refreshCodexProjects').addEventListener('click', () => void loadCodexProjects());
 $('codexProject').addEventListener('change', () => {

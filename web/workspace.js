@@ -73,15 +73,27 @@ export class ScheduledView {
     const notification=element('select');notification.id='notificationPolicy';notification.append(new Option('所有运行','all'),new Option('仅异常运行','errors'),new Option('不通知','none'));settings.append(setting('通知',notification));
     this.newChat=checkbox('everyRunNew',true);settings.append(setting('每次运行时都开启新聊天',this.newChat));
     const archive=checkbox('archiveSuccessful');settings.append(setting('归档成功运行记录',archive));
-    settings.append(setting('项目',$('codexProject')));
     settings.append(setting('Agent',$('provider')));
+    const projectRow=(id,select,refresh)=>{
+      const row=setting('项目',element('span','schedule-project-control'));row.id=id;
+      row.lastChild.append(select,refresh);settings.append(row);
+    };
+    projectRow('codexScheduleProject',$('codexProject'),$('refreshCodexProjects'));
+    projectRow('doubaoScheduleProject',$('nativeProject'),$('refreshProjects'));
+    this.doubaoHelp=element('p','schedule-note','选择豆包客户端项目，或保留普通聊天。项目未显示时，在豆包展开项目后刷新。');settings.append(this.doubaoHelp);
+    const wbProject=element('select');wbProject.id='workbuddyProject';wbProject.append(new Option('选择项目目录',''));
+    const wbRefresh=button('刷新',()=>wbProject.dispatchEvent(new Event('refresh')),'quiet');wbRefresh.id='refreshWorkbuddyProjects';
+    projectRow('workbuddyScheduleProject',wbProject,wbRefresh);
+    this.workbuddyHelp=element('p','schedule-project-path');this.workbuddyHelp.id='workbuddyProjectPath';settings.append(this.workbuddyHelp);
+    settings.append($('projectFields'));
     const model=element('input');model.id='taskModel';model.placeholder='沿用客户端';model.setAttribute('list','scheduleModels');model.autocomplete='off';model.maxLength=120;
     const models=element('datalist');models.id='scheduleModels';settings.append(setting('模型',model),models);
     const effort=element('select');effort.id='taskEffort';
     for(const [value,text] of [['','沿用客户端'],['low','低'],['medium','中'],['high','高'],['xhigh','很高'],['max','最高'],['ultra','极高']])effort.append(new Option(text,value));
     settings.append(setting('强度',effort));
-    const localNote=element('p','schedule-note','任务在本机后台运行，请保持电脑开机。成功记录归档后仍可查看，不会删除对话。');settings.append(localNote);
-    const rest=element('div','schedule-extra');advanced.append(rest);
+    this.clientSettingsNote=element('p','schedule-note');settings.append(this.clientSettingsNote);
+    const more=element('details','schedule-more');more.append(element('summary','','更多设置'));advanced.append(more);
+    const rest=element('div','schedule-extra');more.append(rest);
     const name=setting('任务名称',$('taskTitle'));$('taskTitle').required=false;$('taskTitle').placeholder='根据说明自动命名';rest.append(name);
     rest.append(setting('运行条件',$('triggerType')),$('dependencyFields'));
     if($('watchFields'))rest.append($('watchFields'));
@@ -89,17 +101,17 @@ export class ScheduledView {
     const choice=document.querySelector('input[name="threadMode"]').closest('.choice-row');
     const reuse=element('label','radio-choice'),radio=element('input');radio.type='radio';radio.name='threadMode';radio.value='reuse';reuse.append(radio,element('span','','复用任务对话'));choice.append(reuse);
     target.append(choice,$('existingThreadField'));rest.append(target);
-    rest.append($('nativeProjectFields'),$('projectFields'));
     // Retain helper/control nodes, without the old numbered editor sections.
-    const helpers=element('div','schedule-notes');helpers.append($('newThreadHelp'),$('providerHelp'),$('triggerHelp'),$('codexProjectHelp'),$('refreshCodexProjects'));
+    const helpers=element('div','schedule-notes');helpers.append($('newThreadHelp'),$('providerHelp'),$('triggerHelp'),$('codexProjectHelp'));
     rest.append(helpers,$('timeoutMinutes').closest('.timeout-field'),setting('错过预约时间',$('latePolicy')),$('defaultModel'));
     const actions=document.querySelector('.form-actions');
     this.cancel=button('取消',()=>void close(),'secondary');actions.prepend(this.cancel);
     const retained=element('div');retained.hidden=true;
     for(const child of original)retained.append(child);
-    form.replaceChildren(promptSection,timeFields,advanced,retained,actions);
+    const scrollBody=element('div','schedule-form-body');scrollBody.append(promptSection,timeFields,advanced,retained);
+    form.replaceChildren(scrollBody,actions);
     $('taskActions').hidden=true;
-    $('taskForm').addEventListener('invalid',event=>{if(advanced.contains(event.target))advanced.open=true;},true);
+    $('taskForm').addEventListener('invalid',event=>{for(let node=event.target.parentElement;node;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;},true);
     this.newChat.addEventListener('change',()=>{
       document.querySelector(`input[name="threadMode"][value="${this.newChat.checked?'new':'reuse'}"]`).checked=true;
       document.querySelector('input[name="threadMode"]:checked').dispatchEvent(new Event('change',{bubbles:true}));
@@ -123,8 +135,18 @@ export class ScheduledView {
     const mode=document.querySelector('input[name="threadMode"]:checked')?.value;
     this.newChat.checked=mode==='new';$('scheduleTarget').hidden=mode==='new';
     const provider=$('provider').value, capabilities=this.state?.providers?.find(row=>row.id===provider)?.capabilities || {};
-    $('codexProject').closest('.schedule-setting').hidden=provider!=='codex';$('codexProject').required=false;
-    for(const id of ['taskModel','taskEffort'])$(id).disabled=($(id).id==='taskModel'?capabilities.model:capabilities.effort)===false;
+    $('codexScheduleProject').hidden=provider!=='codex';$('codexProject').required=false;
+    $('doubaoScheduleProject').hidden=provider!=='doubaoDesktop';this.doubaoHelp.hidden=provider!=='doubaoDesktop';
+    $('workbuddyScheduleProject').hidden=provider!=='workbuddyDesktop';this.workbuddyHelp.hidden=provider!=='workbuddyDesktop';
+    const clientSettings=['workbuddyDesktop','doubaoDesktop'].includes(provider);
+    for(const id of ['taskModel','taskEffort']){
+      const supported=!clientSettings&&($(id).id==='taskModel'?capabilities.model:capabilities.effort)!==false;
+      $(id).disabled=!supported;$(id).closest('.schedule-setting').hidden=!supported;
+    }
+    this.clientSettingsNote.hidden=!clientSettings;this.clientSettingsNote.textContent=provider==='workbuddyDesktop'?'模型和权限沿用 WorkBuddy 客户端设置。':'模型和权限沿用豆包客户端设置。';
+    $('projectFields').hidden=provider==='codex'||provider==='doubaoDesktop'||provider==='workbuddyDesktop';
+    $('workbuddyProject').required=provider==='workbuddyDesktop';if(provider==='workbuddyDesktop')$('cwd').required=false;
+    $('codexProjectHelp').hidden=provider!=='codex';
     const newOnly=provider!=='codex'&&capabilities.resume===false;this.newChat.disabled=newOnly;
     $('scheduleLocal').checked=true;$('scheduleLocal').disabled=true;
     $('scheduleTimeRow').hidden=$('repeatFrequency').value==='once'||$('triggerType').value!=='time';
@@ -177,7 +199,7 @@ export class ScheduledView {
       const control=button(text,async()=>{control.disabled=true;try{await api(`tasks/${task.id}/${path}`,'POST');await this.refresh();}catch(error){toast(error.message,true);control.disabled=false;}},'secondary');control.disabled=action==='run'&&(state.scheduledTasksVersion!==1||busy||task.paused||!hasPending(task)&&task.trigger.type!=='time');control.dataset.action=action;actions.append(control);
     }
     const remove=button('删除任务',async()=>{await this.select(task);$('deleteTask').click();},'text-button danger');remove.dataset.action='delete';remove.disabled=busy;actions.append(remove);this.detail.append(actions);
-    const facts=element('div','schedule-facts');for(const value of [task.nativeProjectName||'无项目',task.threadMode==='new'?'每次开启新聊天':'连续使用同一对话',task.model||'客户端默认模型'])facts.append(element('span','',value));this.detail.append(facts);
+    const facts=element('div','schedule-facts');for(const value of [task.nativeProjectName||(task.cwd?task.cwd.split(/[\\/]/).filter(Boolean).at(-1):'无项目'),task.threadMode==='new'?'每次开启新聊天':'连续使用同一对话',task.model||'客户端默认模型'])facts.append(element('span','',value));this.detail.append(facts);
     const history=element('div','schedule-history-heading');history.append(element('h3','','运行记录'));const show=checkbox('taskShowArchived',this.showArchived);show.className='';show.addEventListener('change',()=>{this.showArchived=show.checked;this.renderDetail(task,state,hasPending);});const label=element('label','','显示已归档');label.prepend(show);history.append(label);this.detail.append(history);
     const runs=state.runs.filter(run=>run.taskId===task.id&&!run.deletedAt&&(this.showArchived||!run.archivedAt)).toReversed();
     for(const run of runs){const record=button('',()=>this.openRun(run.id),'schedule-history-run');const heading=element('span','');heading.append(element('strong','',date.format(run.startedAt)),element('span','badge '+run.status,(labels[run.status]||run.status)+(run.archivedAt?' · 已归档':'')));record.append(heading,element('p','',run.error||(run.outputPreview || run.output)?.slice(0,180)||'查看本次对话与结果'));this.detail.append(record);}

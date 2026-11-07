@@ -58,7 +58,7 @@ export function createPreviewServer({ webRoot = path.join(project, 'web') } = {}
       if (route === '/__preview/state' && req.method === 'POST') { Object.assign(state, input); updateCounts(); for (const client of clients) client.write('event: change\ndata: {}\n\n'); return send(res, state); }
       if (route === '/api/state') { updateCounts(); return send(res, {...state,scheduledTasksVersion:1}); }
       if (route === '/api/models') return send(res, {models:[{model:'demo-model',displayName:'演示模型'}]});
-      if (route === '/api/projects') return send(res, {projects:[{id:'demo-project',name:'AgentDesk',rootPaths:['E:\\AgentDesk']}]});
+      if (route === '/api/projects') return send(res, {projects:[{id:'demo-project',name:'AgentDesk',cwd:'E:\\AgentDesk',rootPaths:['E:\\AgentDesk']}]});
       if (route === '/api/folders/validate') return send(res, {cwd:input.cwd});
       if (route === '/api/threads') return send(res, { threads: state.sessionHub.sessions.map(s => ({ id: s.nativeId, name: s.name, cwd: s.cwd, status: s.status })) });
       if (route.startsWith('/api/runs/')) return send(res, state.runs.find(r => r.id === route.split('/').at(-1)));
